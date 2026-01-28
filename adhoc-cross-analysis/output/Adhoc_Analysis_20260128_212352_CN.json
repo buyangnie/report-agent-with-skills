@@ -1,0 +1,76 @@
+{
+  "query": "工单量趋势",
+  "intent": {
+    "type": "trend",
+    "dimension": "category",
+    "metric": "volume",
+    "order": "asc",
+    "limit": 5,
+    "filters": {}
+  },
+  "data": [
+    {
+      "name": "2025-W16",
+      "value": 103,
+      "count": 103
+    },
+    {
+      "name": "2025-W17",
+      "value": 111,
+      "count": 111
+    },
+    {
+      "name": "2025-W18",
+      "value": 118,
+      "count": 118
+    },
+    {
+      "name": "2025-W19",
+      "value": 132,
+      "count": 132
+    },
+    {
+      "name": "2025-W20",
+      "value": 192,
+      "count": 192
+    },
+    {
+      "name": "2025-W21",
+      "value": 161,
+      "count": 161
+    },
+    {
+      "name": "2025-W22",
+      "value": 124,
+      "count": 124
+    },
+    {
+      "name": "2025-W23",
+      "value": 96,
+      "count": 96
+    },
+    {
+      "name": "2025-W24",
+      "value": 161,
+      "count": 161
+    },
+    {
+      "name": "2025-W25",
+      "value": 168,
+      "count": 168
+    },
+    {
+      "name": "2025-W26",
+      "value": 178,
+      "count": 178
+    },
+    {
+      "name": "2025-W27",
+      "value": 101,
+      "count": 101
+    }
+  ],
+  "samples": [],
+  "description": "工单量趋势分析：从 2025-W16 到 2025-W27，整体下降 **1.9%**。\n\n起始值: 103 → 最终值: 101\n\n各期详情：\n- 2025-W22: 124\n- 2025-W23: 96\n- 2025-W24: 161\n- 2025-W25: 168\n- 2025-W26: 178\n- 2025-W27: 101\n",
+  "timestamp": "2026-01-28T21:23:52.273390"
+}

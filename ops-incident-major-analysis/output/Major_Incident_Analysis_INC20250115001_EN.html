@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Major Incident Analysis Report - INC20250115001</title>
+    <style>
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f3f4f6; color: #374151; line-height: 1.6; }
+.container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+.header { background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; padding: 30px; border-radius: 12px; margin-bottom: 24px; }
+.header h1 { font-size: 28px; margin-bottom: 8px; }
+.header .subtitle { opacity: 0.9; font-size: 16px; }
+.card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.card h2 { font-size: 20px; color: #1e40af; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #e5e7eb; }
+.card h3 { font-size: 16px; color: #374151; margin: 20px 0 12px; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 20px; }
+.metric { background: #f9fafb; padding: 16px; border-radius: 8px; text-align: center; }
+.metric .value { font-size: 28px; font-weight: bold; color: #1e40af; }
+.metric .label { color: #6b7280; font-size: 13px; margin-top: 4px; }
+.metric.danger .value { color: #ef4444; }
+.metric.warning .value { color: #f59e0b; }
+.metric.success .value { color: #10b981; }
+table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+th { background: #f9fafb; font-weight: 600; color: #374151; }
+tr:hover { background: #f9fafb; }
+.badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+.badge.high, .badge.critical { background: #fee2e2; color: #991b1b; }
+.badge.medium, .badge.severe { background: #fef3c7; color: #92400e; }
+.badge.low, .badge.minor { background: #d1fae5; color: #065f46; }
+.badge.process { background: #dbeafe; color: #1e40af; }
+.badge.resource { background: #ede9fe; color: #6b21a8; }
+.badge.external { background: #fef3c7; color: #92400e; }
+.recommendation { padding: 16px; border-left: 4px solid #3b82f6; background: #f9fafb; margin: 12px 0; border-radius: 0 8px 8px 0; }
+.recommendation.critical { border-left-color: #ef4444; background: #fef2f2; }
+.recommendation.high { border-left-color: #f59e0b; background: #fffbeb; }
+.recommendation strong { color: #374151; }
+.recommendation ul { margin: 8px 0 0 20px; }
+.recommendation li { margin: 4px 0; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+.footnote { font-size: 12px; color: #6b7280; margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e5e7eb; }
+.alert { padding: 12px 16px; border-radius: 8px; margin: 16px 0; }
+.alert.danger { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+.alert.warning { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; }
+.alert.success { background: #f0fdf4; border: 1px solid #86efac; color: #166534; }
+.footer { text-align: center; padding: 20px; color: #6b7280; font-size: 14px; }
+
+/* Timeline Styles */
+.timeline-container { position: relative; padding-left: 20px; }
+.timeline-container::before { content: ''; position: absolute; left: 6px; top: 0; bottom: 0; width: 2px; background: linear-gradient(to bottom, #3b82f6, #10b981); }
+.timeline-event { position: relative; display: flex; gap: 1rem; padding: 12px 0; padding-left: 20px; }
+.timeline-event::before { content: ''; position: absolute; left: -17px; top: 16px; width: 10px; height: 10px; border-radius: 50%; background: white; border: 2px solid #3b82f6; }
+.timeline-event:last-child::after { content: ''; position: absolute; left: -14px; top: 24px; bottom: 0; width: 2px; background: white; }
+.timeline-event.event-resolved::before, .timeline-event.event-closed::before { background: #10b981; border-color: #10b981; }
+.timeline-event.event-escalated::before { background: #f59e0b; border-color: #f59e0b; }
+.timeline-time { width: 150px; flex-shrink: 0; color: #6b7280; font-size: 13px; }
+.timeline-content { flex-grow: 1; }
+.timeline-event-type { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; margin-right: 8px; }
+.event-created { background: #dbeafe; color: #1e40af; }
+.event-assigned { background: #d1fae5; color: #065f46; }
+.event-escalated { background: #ffedd5; color: #c2410c; }
+.event-reassigned { background: #fef3c7; color: #b45309; }
+.event-status_change { background: #ede9fe; color: #6d28d9; }
+.event-resolved { background: #d1fae5; color: #065f46; }
+.event-closed { background: #e5e7eb; color: #374151; }
+.event-note { background: #f3f4f6; color: #6b7280; }
+
+/* Issue Cards - Enhanced */
+.issue-card { padding: 20px; margin-bottom: 16px; border-radius: 12px; border-left: 5px solid; box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: all 0.2s ease; position: relative; overflow: hidden; }
+.issue-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); transform: translateY(-2px); }
+.issue-card::before { content: ''; position: absolute; top: 0; right: 0; width: 60px; height: 60px; opacity: 0.1; background-size: 32px; background-repeat: no-repeat; background-position: center; }
+.issue-critical { background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border-left-color: #ef4444; }
+.issue-critical::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%23ef4444' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z'/%3E%3C/svg%3E"); }
+.issue-high { background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%); border-left-color: #f97316; }
+.issue-medium { background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left-color: #eab308; }
+.issue-low { background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border-left-color: #22c55e; }
+.issue-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.issue-icon { font-size: 20px; line-height: 1; }
+.issue-severity { padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; color: white; letter-spacing: 0.5px; }
+.severity-critical { background: linear-gradient(135deg, #ef4444, #dc2626); box-shadow: 0 2px 4px rgba(239,68,68,0.3); }
+.severity-high { background: linear-gradient(135deg, #f97316, #ea580c); box-shadow: 0 2px 4px rgba(249,115,22,0.3); }
+.severity-medium { background: linear-gradient(135deg, #eab308, #ca8a04); box-shadow: 0 2px 4px rgba(234,179,8,0.3); }
+.severity-low { background: linear-gradient(135deg, #22c55e, #16a34a); box-shadow: 0 2px 4px rgba(34,197,94,0.3); }
+.issue-title { font-weight: 600; font-size: 15px; color: #1f2937; }
+.issue-description { color: #4b5563; font-size: 14px; line-height: 1.5; margin-top: 4px; }
+.issue-meta { margin-top: 12px; padding-top: 12px; border-top: 1px dashed rgba(0,0,0,0.1); font-size: 13px; color: #6b7280; display: flex; align-items: center; gap: 6px; }
+.issue-meta-icon { opacity: 0.6; }
+
+/* Insights Box */
+.insights-box { background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%); padding: 20px; border-radius: 8px; border: 1px solid #e5e7eb; }
+.insight-item { margin-bottom: 16px; }
+.insight-item:last-child { margin-bottom: 0; }
+
+/* Root Cause Analysis */
+.root-cause-box { background: linear-gradient(135deg, #fef3c7 0%, #ffedd5 100%); padding: 20px; border-radius: 8px; border: 1px solid #fcd34d; margin-bottom: 16px; }
+.five-whys { counter-reset: why-counter; padding-left: 56px; margin-left: 0; }
+.five-whys li { list-style: none; padding: 12px 0 12px 16px; position: relative; border-left: 2px solid #f59e0b; }
+.five-whys li::before { counter-increment: why-counter; content: "Why " counter(why-counter); position: absolute; left: -56px; top: 12px; background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.control-failures { background: #fef2f2; padding: 16px; border-radius: 8px; border-left: 4px solid #ef4444; }
+.control-failures ul { margin: 8px 0 0 20px; }
+
+/* Action Items */
+.action-item { display: grid; grid-template-columns: auto 1fr auto auto; gap: 16px; padding: 16px; background: #f9fafb; border-radius: 8px; margin-bottom: 8px; align-items: center; }
+.action-item-id { font-family: monospace; background: #1e40af; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+.action-item-content { flex-grow: 1; }
+.action-item-title { font-weight: 600; color: #374151; }
+.action-item-meta { font-size: 13px; color: #6b7280; margin-top: 4px; }
+.status-badge { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.status-open { background: #dbeafe; color: #1e40af; }
+.status-in_progress { background: #fef3c7; color: #b45309; }
+.status-completed { background: #d1fae5; color: #065f46; }
+.status-blocked { background: #fef2f2; color: #dc2626; }
+.priority-badge { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.priority-high { background: #fef2f2; color: #dc2626; }
+.priority-medium { background: #fef3c7; color: #b45309; }
+.priority-low { background: #d1fae5; color: #065f46; }
+
+/* Visualization Cards */
+.viz-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 16px; }
+@media (max-width: 768px) { .viz-container { grid-template-columns: 1fr; } }
+.viz-card { background: #f9fafb; border-radius: 8px; padding: 16px; border: 1px solid #e5e7eb; }
+.viz-title { font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 12px; text-align: center; }
+.gantt-chart { width: 100%; overflow-x: auto; }
+.gantt-row { display: flex; align-items: center; margin: 6px 0; gap: 8px; }
+.gantt-bar { height: 28px; border-radius: 4px; display: flex; align-items: center; padding: 0 10px; font-size: 12px; color: white; font-weight: 500; min-width: fit-content; white-space: nowrap; }
+.gantt-label { font-size: 12px; color: #374151; font-weight: 500; white-space: nowrap; }
+.sla-gauge { display: flex; flex-direction: column; align-items: center; padding: 16px; }
+.gauge-circle { position: relative; width: 120px; height: 120px; }
+.gauge-circle svg { transform: rotate(-90deg); }
+.gauge-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+.gauge-value { font-size: 24px; font-weight: 700; }
+.gauge-label { font-size: 12px; color: #6b7280; }
+
+/* Escalation Path */
+.escalation-path { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; padding: 16px; }
+.escalation-node { background: #f9fafb; padding: 8px 16px; border-radius: 8px; border: 2px solid #e5e7eb; font-size: 13px; text-align: center; }
+.escalation-node.active { border-color: #3b82f6; background: #dbeafe; }
+.escalation-arrow { color: #6b7280; font-size: 20px; }
+
+/* Tags */
+.tag { display: inline-block; padding: 3px 8px; background: #f3f4f6; border-radius: 4px; font-size: 13px; margin-right: 4px; }
+
+@media print {
+    body { background: white; }
+    .container { max-width: none; padding: 16px; }
+    .card { box-shadow: none; border: 1px solid #e5e7eb; page-break-inside: avoid; }
+    .header { background: #1e40af !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        
+<div class="header">
+    <h1>Major Incident Analysis Report</h1>
+    <div class="subtitle">INC20250115001 - Core Trading Database Primary Node Down Causing Full Site Transaction Outage</div>
+</div>
+
+        
+<div class="card">
+    <h2>Incident Overview</h2>
+    <div class="metrics">
+        <div class="metric">
+            <div class="value">P1</div>
+            <div class="label">Priority</div>
+        </div>
+        <div class="metric">
+            <div class="value">Database</div>
+            <div class="label">Category</div>
+        </div>
+        <div class="metric success">
+            <div class="value">Resolved</div>
+            <div class="label">Status</div>
+        </div>
+        <div class="metric">
+            <div class="value">3.5 hours</div>
+            <div class="label">Duration</div>
+        </div>
+        <div class="metric success">
+            <div class="value">Met</div>
+            <div class="label">Response Time SLA</div>
+        </div>
+    </div>
+    <p style="margin-top: 16px;"><strong>Title:</strong> Core Trading Database Primary Node Down Causing Full Site Transaction Outage</p>
+    <p style="margin-top: 8px;"><strong>Affected Systems:</strong> Trading System, Order Service, Payment Gateway, User Center, Merchant Portal</p>
+</div>
+
+        
+<div class="card">
+    <h2>Time Breakdown</h2>
+    <div class="viz-container">
+        
+        <div class="viz-card">
+            <div class="viz-title">Phase Duration</div>
+            <div class="gantt-chart">
+                
+        <div class="gantt-row">
+            <div class="gantt-bar" style="width: 8%; background: #3b82f6;"></div>
+            <span class="gantt-label">Open: 3 minutes</span>
+        </div>
+        <div class="gantt-row">
+            <div class="gantt-bar" style="width: 91.42857142857143%; background: #f59e0b;">In Progress: 192 minutes</div>
+        </div>
+        <div class="gantt-row">
+            <div class="gantt-bar" style="width: 8%; background: #10b981;"></div>
+            <span class="gantt-label">Resolved: 15 minutes</span>
+        </div>
+            </div>
+        </div>
+        
+        <div class="viz-card">
+            <div class="viz-title">SLA Compliance</div>
+            <div class="sla-gauge">
+                <div class="gauge-circle">
+                    <svg width="120" height="120" viewBox="0 0 120 120">
+                        <circle cx="60" cy="60" r="45" fill="none" stroke="#e5e7eb" stroke-width="10"/>
+                        <circle cx="60" cy="60" r="45" fill="none" stroke="#ef4444" stroke-width="10"
+                                stroke-dasharray="247.625 283" stroke-linecap="round"/>
+                    </svg>
+                    <div class="gauge-text">
+                        <div class="gauge-value" style="color: #ef4444;">175%</div>
+                        <div class="gauge-label">Violated</div>
+                    </div>
+                </div>
+                <div style="margin-top: 8px; font-size: 13px; color: #6b7280;">
+                    210 / 120 minutes
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <h3 style="margin-top: 1rem;">Escalation Path</h3>
+    <div class="escalation-path">
+        <div class="escalation-node">L1 Ops</div><span class="escalation-arrow">→</span><div class="escalation-node active">L2 DBA Team</div><span class="escalation-arrow">→</span><div class="escalation-node active">Architect + Business Owner</div>
+    </div>
+</div>
+
+        
+<div class="card">
+    <h2>Timeline</h2>
+    <div class="timeline-container">
+        
+<div class="timeline-event event-created">
+    <div class="timeline-time">2025-01-15 09:15 </div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-created">created</span>
+        <strong>Monitoring System</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Auto-alert triggered: Core trading database connection failure rate > 90%, primary node unresponsive</div>
+    </div>
+</div>
+
+<div class="timeline-event event-assigned">
+    <div class="timeline-time">2025-01-15 09:16 <span class='tag'>+1m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-assigned">assigned</span>
+        <strong>Auto Dispatcher</strong>
+        <div style="color: #6b7280; margin-top: 4px;">→ Li Ming (L1 On-call) | Auto-assigned to L1 ops on-call based on rotation schedule</div>
+    </div>
+</div>
+
+<div class="timeline-event event-status_change">
+    <div class="timeline-time">2025-01-15 09:18 <span class='tag'>+2m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-status_change">status_change</span>
+        <strong>Li Ming</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Open → In Progress | Alert acknowledged, starting investigation. Initial assessment: database primary node issue</div>
+    </div>
+</div>
+
+<div class="timeline-event event-note">
+    <div class="timeline-time">2025-01-15 09:22 <span class='tag'>+4m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-note">note</span>
+        <strong>Li Ming</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Failed to connect to primary node, SSH unresponsive. Contacting IDC to confirm server status</div>
+    </div>
+</div>
+
+<div class="timeline-event event-escalated">
+    <div class="timeline-time">2025-01-15 09:25 <span class='tag'>+3m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-escalated">escalated</span>
+        <strong>Li Ming</strong>
+        <div style="color: #6b7280; margin-top: 4px;">L1 Ops → L2 DBA Team | Need DBA expert involvement for database failover handling</div>
+    </div>
+</div>
+
+<div class="timeline-event event-assigned">
+    <div class="timeline-time">2025-01-15 09:28 <span class='tag'>+3m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-assigned">assigned</span>
+        <strong>DBA Team Lead</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Li Ming → Zhang Wei (Senior DBA) | Assigned to senior DBA for emergency failover handling</div>
+    </div>
+</div>
+
+<div class="timeline-event event-note">
+    <div class="timeline-time">2025-01-15 09:32 <span class='tag'>+4m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-note">note</span>
+        <strong>Zhang Wei</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Confirmed primary node hardware failure (disk array damaged), preparing to execute primary-replica failover</div>
+    </div>
+</div>
+
+<div class="timeline-event event-note">
+    <div class="timeline-time">2025-01-15 09:35 <span class='tag'>+3m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-note">note</span>
+        <strong>Zhang Wei</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Found replica node has ~5 minute sync delay, need to assess data loss risk</div>
+    </div>
+</div>
+
+<div class="timeline-event event-escalated">
+    <div class="timeline-time">2025-01-15 09:40 <span class='tag'>+5m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-escalated">escalated</span>
+        <strong>Zhang Wei</strong>
+        <div style="color: #6b7280; margin-top: 4px;">L2 DBA Team → Architect + Business Owner | Sync delay issue requires business decision: whether to accept potential data loss for failover</div>
+    </div>
+</div>
+
+<div class="timeline-event event-note">
+    <div class="timeline-time">2025-01-15 09:45 <span class='tag'>+5m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-note">note</span>
+        <strong>Director Wang (Business Owner)</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Business impact assessment: current loss ~500K CNY per minute in transactions, decision made to accept failover risk</div>
+    </div>
+</div>
+
+<div class="timeline-event event-note">
+    <div class="timeline-time">2025-01-15 09:48 <span class='tag'>+3m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-note">note</span>
+        <strong>Zhang Wei</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Starting database primary-replica failover procedure</div>
+    </div>
+</div>
+
+<div class="timeline-event event-note">
+    <div class="timeline-time">2025-01-15 10:05 <span class='tag'>+17m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-note">note</span>
+        <strong>Zhang Wei</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Primary-replica failover completed, new primary node online. Starting data consistency verification</div>
+    </div>
+</div>
+
+<div class="timeline-event event-note">
+    <div class="timeline-time">2025-01-15 10:15 <span class='tag'>+10m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-note">note</span>
+        <strong>Zhang Wei</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Found ~2000 transactions with data inconsistency, need to restore from backup</div>
+    </div>
+</div>
+
+<div class="timeline-event event-reassigned">
+    <div class="timeline-time">2025-01-15 10:20 <span class='tag'>+5m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-reassigned">reassigned</span>
+        <strong>Zhang Wei</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Zhang Wei → Chen Fang (Data Recovery Specialist) | Data recovery work handed over to specialist</div>
+    </div>
+</div>
+
+<div class="timeline-event event-note">
+    <div class="timeline-time">2025-01-15 10:35 <span class='tag'>+15m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-note">note</span>
+        <strong>Chen Fang</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Located missing transaction records from incremental backup, starting data recovery</div>
+    </div>
+</div>
+
+<div class="timeline-event event-note">
+    <div class="timeline-time">2025-01-15 11:30 <span class='tag'>+55m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-note">note</span>
+        <strong>Chen Fang</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Data recovery completed, all transaction records restored. Core trading system back to normal</div>
+    </div>
+</div>
+
+<div class="timeline-event event-note">
+    <div class="timeline-time">2025-01-15 11:45 <span class='tag'>+15m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-note">note</span>
+        <strong>Li Ming</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Monitoring metrics back to normal, transaction success rate 99.9%, response time normal</div>
+    </div>
+</div>
+
+<div class="timeline-event event-note">
+    <div class="timeline-time">2025-01-15 12:00 <span class='tag'>+15m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-note">note</span>
+        <strong>Zhang Wei</strong>
+        <div style="color: #6b7280; margin-top: 4px;">IDC confirmed failed server has disk array controller failure, replacement scheduled</div>
+    </div>
+</div>
+
+<div class="timeline-event event-resolved">
+    <div class="timeline-time">2025-01-15 12:30 <span class='tag'>+30m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-resolved">resolved</span>
+        <strong>Zhang Wei</strong>
+        <div style="color: #6b7280; margin-top: 4px;">System fully restored to normal operation, 1 hour continuous monitoring shows no issues. Root cause: primary node disk array controller hardware failure</div>
+    </div>
+</div>
+
+<div class="timeline-event event-closed">
+    <div class="timeline-time">2025-01-15 12:45 <span class='tag'>+15m</span></div>
+    <div class="timeline-content">
+        <span class="timeline-event-type event-closed">closed</span>
+        <strong>Director Wang</strong>
+        <div style="color: #6b7280; margin-top: 4px;">Confirmed full business recovery, data integrity verification passed. Post-incident review meeting to be scheduled</div>
+    </div>
+</div>
+
+    </div>
+</div>
+
+        
+<div class="card">
+    <h2>Time Analysis</h2>
+    <div class="metrics" style="margin-bottom: 16px;">
+        <div class="metric">
+            <div class="value">1 minute</div>
+            <div class="label">Response Time</div>
+        </div>
+        <div class="metric">
+            <div class="value">3.5 hours (210 minutes)</div>
+            <div class="label">Resolution Time</div>
+        </div>
+    </div>
+    
+    <h3>Phase Duration</h3>
+    <table>
+        <thead><tr><th>Phase</th><th>Duration</th></tr></thead>
+        <tbody><tr><td>Open</td><td>3 minutes</td></tr><tr><td>In Progress</td><td>192 minutes</td></tr><tr><td>Resolved</td><td>15 minutes</td></tr></tbody>
+    </table>
+    
+</div>
+
+        
+<div class="card">
+    <h2>Flow Analysis</h2>
+    <div class="metrics">
+        <div class="metric warning">
+            <div class="value">2</div>
+            <div class="label">Escalations</div>
+        </div>
+        <div class="metric ">
+            <div class="value">1</div>
+            <div class="label">Reassignments</div>
+        </div>
+        <div class="metric">
+            <div class="value">9</div>
+            <div class="label">Participants</div>
+        </div>
+    </div>
+    <p style="margin-top: 16px;"><strong>Participants:</strong> Architect + Business Owner, Auto Dispatcher, Chen Fang (Data Recovery Specialist), DBA Team Lead, Director Wang (Business Owner), L2 DBA Team, Li Ming (L1 On-call), Monitoring System, Zhang Wei (Senior DBA)</p>
+</div>
+
+        
+<div class="card">
+    <h2>Root Cause & Control Point Analysis</h2>
+    <div class="root-cause-box">
+        <strong>Root Cause (Database):</strong>
+        <p style="margin-top: 8px;">The primary failure was architectural: a single point of failure in the database cluster with insufficient data synchronization between master and slave nodes (5-minute delay). The 55-minute data recovery gap indicates inadequate backup strategies or recovery procedures. Multiple escalations and reassignments suggest unclear ownership boundaries. The 30-minute monitoring gap after resolution shows insufficient post-recovery validation processes. The SLA violation stemmed from cascading issues: hardware failure → delayed switchover decision → data inconsistency discovery → lengthy manual recovery.</p>
+    </div>
+    
+        <h3>5-Why Analysis</h3>
+        <ol class="five-whys">
+            <li>Why was SLA violated? — Resolution time exceeded expectations</li><li>Why did resolution time exceed expectations? — Diagnosis and decision-making took too long</li><li>Why did diagnosis/decision take too long? — Lack of runbooks and automation tools</li><li>Why lack of runbooks? — Insufficient drills for this scenario</li><li>Why insufficient drills? — Drill plan incomplete or not executed properly</li>
+        </ol>
+
+    
+        <h3>Control Point Failures</h3>
+        <div class="control-failures">
+            <ul>
+                <li>Monitoring failed to detect early warning signs</li><li>Failover process not sufficiently automated</li><li>Data sync delay monitoring inadequate</li>
+            </ul>
+        </div>
+
+    
+        <h3>Contributing Factors</h3>
+        <ul>
+            <li>Long waiting periods during handling process</li><li>Multiple escalations indicate insufficient initial handling capability</li>
+        </ul>
+
+</div>
+
+        
+<div class="card">
+    <h2>Issues Detected (5)</h2>
+    
+<div class="issue-card issue-critical">
+    <div class="issue-header">
+        <span class="issue-icon">🚨</span>
+        <span class="issue-severity severity-critical">critical</span>
+        <span class="issue-title">SLA Resolution Time Violated</span>
+    </div>
+    <div class="issue-description">Resolution time (3.5 hours) exceeded SLA target (2 hours)</div>
+    
+</div>
+
+<div class="issue-card issue-medium">
+    <div class="issue-header">
+        <span class="issue-icon">📋</span>
+        <span class="issue-severity severity-medium">medium</span>
+        <span class="issue-title">Long Activity Gap</span>
+    </div>
+    <div class="issue-description">No activity for 55 minutes between events</div>
+    <div class="issue-meta"><span class="issue-meta-icon">👤</span>Actor: Chen Fang</div>
+</div>
+
+<div class="issue-card issue-medium">
+    <div class="issue-header">
+        <span class="issue-icon">📋</span>
+        <span class="issue-severity severity-medium">medium</span>
+        <span class="issue-title">Long Activity Gap</span>
+    </div>
+    <div class="issue-description">No activity for 30 minutes between events</div>
+    <div class="issue-meta"><span class="issue-meta-icon">👤</span>Actor: Zhang Wei</div>
+</div>
+
+<div class="issue-card issue-medium">
+    <div class="issue-header">
+        <span class="issue-icon">📋</span>
+        <span class="issue-severity severity-medium">medium</span>
+        <span class="issue-title">Multiple Escalations</span>
+    </div>
+    <div class="issue-description">Incident was escalated 2 times</div>
+    
+</div>
+
+<div class="issue-card issue-medium">
+    <div class="issue-header">
+        <span class="issue-icon">📋</span>
+        <span class="issue-severity severity-medium">medium</span>
+        <span class="issue-title">Slow Handover</span>
+    </div>
+    <div class="issue-description">Waited 15 minutes after handover to 陈芳 (数据恢复专家)</div>
+    <div class="issue-meta"><span class="issue-meta-icon">👤</span>Actor: Chen Fang (Data Recovery Specialist)</div>
+</div>
+
+</div>
+
+        
+<div class="card">
+    <h2>AI Insights</h2>
+    <div class="insights-box">
+        
+<div class="insight-item">
+    <strong>Overall Assessment:</strong>
+    <p>The incident handling process demonstrated effective initial response and escalation mechanisms but revealed significant gaps in database architecture resilience, backup strategies, and incident coordination. While the team responded promptly and made appropriate business decisions under pressure, the 3.5-hour resolution time exceeding SLA indicates systemic weaknesses in disaster recovery preparedness and cross-team collaboration.</p>
+</div>
+
+<div class="insight-item">
+    <strong>Highlights:</strong>
+    <ul><li>Excellent initial response time (1 minute vs 15-minute SLA target) with automated alerting and assignment systems functioning effectively</li><li>Appropriate business decision-making under pressure when accepting data loss risk to minimize financial impact (¥500k/minute loss)</li><li>Clear escalation path from L1 to DBA to business leadership with defined roles and responsibilities</li></ul>
+</div>
+
+<div class="insight-item">
+    <strong>Problem Analysis:</strong>
+    <p>The primary failure was architectural: a single point of failure in the database cluster with insufficient data synchronization between master and slave nodes (5-minute delay). The 55-minute data recovery gap indicates inadequate backup strategies or recovery procedures. Multiple escalations and reassignments suggest unclear ownership boundaries. The 30-minute monitoring gap after resolution shows insufficient post-recovery validation processes. The SLA violation stemmed from cascading issues: hardware failure → delayed switchover decision → data inconsistency discovery → lengthy manual recovery.</p>
+</div>
+
+<div class="insight-item">
+    <strong>Improvement Suggestions:</strong>
+    <ul><li>Implement synchronous replication or near-real-time data synchronization between database nodes to minimize data loss during failover</li><li>Establish automated failover procedures with predefined business rules for acceptable data loss thresholds</li><li>Create dedicated incident command structure with clear decision-making authority to reduce escalation delays</li><li>Develop comprehensive runbooks for common failure scenarios including hardware failures and data corruption</li><li>Implement continuous validation during recovery with automated data consistency checks and real-time progress tracking</li></ul>
+</div>
+
+<div class="insight-item">
+    <strong>Prevention Measures:</strong>
+    <ul><li>Deploy database clusters with multiple synchronous replicas and automatic failover capabilities</li><li>Implement regular disaster recovery drills simulating various failure scenarios including hardware failures</li><li>Upgrade monitoring to predictive analytics detecting early signs of hardware degradation (disk controller issues)</li><li>Establish redundant hardware components with hot-swappable capabilities for critical infrastructure</li><li>Create data redundancy through multi-region deployments or cloud-based disaster recovery solutions</li></ul>
+</div>
+
+    </div>
+</div>
+
+        
+<div class="card">
+    <h2>Improvement Action Items</h2>
+    
+<div class="action-item">
+    <span class="action-item-id">AI-001</span>
+    <div class="action-item-content">
+        <div class="action-item-title">Implement synchronous replication or near-real-tim...</div>
+        <div class="action-item-meta">Owner: TBD | Process</div>
+    </div>
+    <span class="priority-badge priority-high">high</span>
+    <span class="status-badge status-open">Open</span>
+</div>
+
+<div class="action-item">
+    <span class="action-item-id">AI-002</span>
+    <div class="action-item-content">
+        <div class="action-item-title">Establish automated failover procedures with prede...</div>
+        <div class="action-item-meta">Owner: TBD | Process</div>
+    </div>
+    <span class="priority-badge priority-high">high</span>
+    <span class="status-badge status-open">Open</span>
+</div>
+
+<div class="action-item">
+    <span class="action-item-id">AI-003</span>
+    <div class="action-item-content">
+        <div class="action-item-title">Create dedicated incident command structure with c...</div>
+        <div class="action-item-meta">Owner: TBD | Process</div>
+    </div>
+    <span class="priority-badge priority-high">high</span>
+    <span class="status-badge status-open">Open</span>
+</div>
+
+<div class="action-item">
+    <span class="action-item-id">AI-004</span>
+    <div class="action-item-content">
+        <div class="action-item-title">Deploy database clusters with multiple synchronous...</div>
+        <div class="action-item-meta">Owner: TBD | Technology</div>
+    </div>
+    <span class="priority-badge priority-medium">medium</span>
+    <span class="status-badge status-open">Open</span>
+</div>
+
+<div class="action-item">
+    <span class="action-item-id">AI-005</span>
+    <div class="action-item-content">
+        <div class="action-item-title">Implement regular disaster recovery drills simulat...</div>
+        <div class="action-item-meta">Owner: TBD | Technology</div>
+    </div>
+    <span class="priority-badge priority-medium">medium</span>
+    <span class="status-badge status-open">Open</span>
+</div>
+
+</div>
+
+        
+<div class="footer">
+    Generated at: 2026-01-29 00:45 | Major Incident Analysis Report
+</div>
+
+    </div>
+</body>
+</html>

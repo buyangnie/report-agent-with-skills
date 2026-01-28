@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>即席分析报告</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f4f6; color: #374151; line-height: 1.6; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .header { background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; padding: 24px; border-radius: 12px; margin-bottom: 20px; }
+        .header h1 { margin: 0 0 8px 0; font-size: 24px; }
+        .header .query { font-size: 18px; opacity: 0.9; }
+        .card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .card h2 { color: #1e40af; margin-top: 0; font-size: 18px; }
+        .description { white-space: pre-wrap; }
+        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        th { background: #f9fafb; font-weight: 600; }
+        .footer { text-align: center; color: #6b7280; font-size: 14px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>即席分析报告</h1>
+            <div class="query">📝 哪个类别 SLA 最差</div>
+        </div>
+        <div class="card">
+            <h2>分析结果</h2>
+            <div class="description">按类别分析SLA达成率，最差的是 **Customer Complaint**，SLA达成率为 **29.0%**。<br><br>排名详情：<br>1. Customer Complaint: 29.0% (工单量: 31)<br>2. Fraud: 42.9% (工单量: 7)<br>3. Other: 54.0% (工单量: 656)<br>4. Compliance: 57.7% (工单量: 220)<br>5. Account Management: 59.0% (工单量: 266)<br><br>证据样本 (来自 Customer Complaint)：<br>- 80002938: P1, MTTR=9459.2h<br>- 80006947: P1, MTTR=47.9h<br>- 80006765: P4, MTTR=47.8h<br></div>
+        </div>
+        <div class="card"><h2>数据表</h2><table><thead><tr><th>Name</th><th>Value</th><th>Count</th></tr></thead><tbody><tr><td>Customer Complaint</td><td>29.0</td><td>31</td></tr><tr><td>Fraud</td><td>42.9</td><td>7</td></tr><tr><td>Other</td><td>54.0</td><td>656</td></tr><tr><td>Compliance</td><td>57.7</td><td>220</td></tr><tr><td>Account Management</td><td>59.0</td><td>266</td></tr></tbody></table></div>
+        <div class="footer">
+            Generated on 2026-01-28 15:06 | Adhoc Analysis
+        </div>
+    </div>
+</body>
+</html>

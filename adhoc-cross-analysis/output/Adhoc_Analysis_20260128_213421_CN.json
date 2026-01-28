@@ -1,0 +1,32 @@
+{
+  "query": "环比对比",
+  "intent": {
+    "type": "comparison",
+    "dimension": "category",
+    "metric": "sla_rate",
+    "order": "desc",
+    "limit": 5,
+    "filters": {}
+  },
+  "data": [
+    {
+      "type": "wow",
+      "label": "Week over Week",
+      "current": "2025-W27",
+      "previous": "2025-W26",
+      "volume_change": -43.3,
+      "sla_change": -10.7
+    },
+    {
+      "type": "mom",
+      "label": "Month over Month",
+      "current": "2025-07",
+      "previous": "2025-06",
+      "volume_change": -88.5,
+      "sla_change": -16.8
+    }
+  ],
+  "samples": [],
+  "description": "对比分析：\n\n**环比** (2025-W26 → 2025-W27)：\n- 工单量减少 43.3%\n- SLA达成率下降 10.7%\n\n**同比** (2025-06 → 2025-07)：\n- 工单量减少 88.5%\n- SLA达成率下降 16.8%\n\n",
+  "timestamp": "2026-01-28T21:34:21.954571"
+}

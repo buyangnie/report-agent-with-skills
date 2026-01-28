@@ -1,0 +1,97 @@
+{
+  "query": "哪个类别 SLA 最差",
+  "intent": {
+    "type": "ranking",
+    "dimension": "category",
+    "metric": "sla_rate",
+    "order": "asc",
+    "limit": 5,
+    "filters": {}
+  },
+  "data": [
+    {
+      "name": "Customer Complaint",
+      "value": 29.0,
+      "count": 31,
+      "sla_rate": 29.0,
+      "avg_mttr": 341.8,
+      "violations": 22
+    },
+    {
+      "name": "Fraud",
+      "value": 42.9,
+      "count": 7,
+      "sla_rate": 42.9,
+      "avg_mttr": 20.0,
+      "violations": 4
+    },
+    {
+      "name": "Other",
+      "value": 54.0,
+      "count": 656,
+      "sla_rate": 54.0,
+      "avg_mttr": 44.8,
+      "violations": 302
+    },
+    {
+      "name": "Compliance",
+      "value": 57.7,
+      "count": 220,
+      "sla_rate": 57.7,
+      "avg_mttr": 67.8,
+      "violations": 93
+    },
+    {
+      "name": "Account Management",
+      "value": 59.0,
+      "count": 266,
+      "sla_rate": 59.0,
+      "avg_mttr": 28.8,
+      "violations": 109
+    }
+  ],
+  "samples": [
+    {
+      "order_number": 80002938,
+      "priority": "P1",
+      "category": "Customer Complaint",
+      "resolver": "David Smith",
+      "mttr": 9459.2,
+      "violated": true
+    },
+    {
+      "order_number": 80006947,
+      "priority": "P1",
+      "category": "Customer Complaint",
+      "resolver": "Christopher Smith",
+      "mttr": 47.9,
+      "violated": true
+    },
+    {
+      "order_number": 80006765,
+      "priority": "P4",
+      "category": "Customer Complaint",
+      "resolver": "Thomas Smith",
+      "mttr": 47.8,
+      "violated": false
+    },
+    {
+      "order_number": 80002765,
+      "priority": "P2",
+      "category": "Customer Complaint",
+      "resolver": "Barbara Smith",
+      "mttr": 47.7,
+      "violated": true
+    },
+    {
+      "order_number": 80005210,
+      "priority": "P3",
+      "category": "Customer Complaint",
+      "resolver": "David Smith",
+      "mttr": 47.3,
+      "violated": true
+    }
+  ],
+  "description": "按类别分析SLA达成率，最差的是 **Customer Complaint**，SLA达成率为 **29.0%**。\n\n排名详情：\n1. Customer Complaint: 29.0% (工单量: 31)\n2. Fraud: 42.9% (工单量: 7)\n3. Other: 54.0% (工单量: 656)\n4. Compliance: 57.7% (工单量: 220)\n5. Account Management: 59.0% (工单量: 266)\n\n证据样本 (来自 Customer Complaint)：\n- 80002938: P1, MTTR=9459.2h\n- 80006947: P1, MTTR=47.9h\n- 80006765: P4, MTTR=47.8h\n",
+  "timestamp": "2026-01-28T15:06:24.388895"
+}

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SLA Violation Attribution Analysis Report</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f3f4f6; color: #374151; line-height: 1.6; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; padding: 30px; border-radius: 12px; margin-bottom: 24px; }
+        .header h1 { font-size: 28px; margin-bottom: 8px; }
+        .header .date { opacity: 0.9; }
+        .card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 20px; color: #1e40af; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #e5e7eb; }
+        .card h3 { font-size: 16px; color: #374151; margin: 20px 0 12px; }
+        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 20px; }
+        .metric { background: #f9fafb; padding: 16px; border-radius: 8px; text-align: center; }
+        .metric .value { font-size: 28px; font-weight: bold; color: #1e40af; }
+        .metric .label { color: #6b7280; font-size: 13px; margin-top: 4px; }
+        .metric.danger .value { color: #ef4444; }
+        .metric.success .value { color: #10b981; }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        th { background: #f9fafb; font-weight: 600; color: #374151; }
+        tr:hover { background: #f9fafb; }
+        .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+        .badge.high, .badge.critical { background: #fee2e2; color: #991b1b; }
+        .badge.medium, .badge.severe { background: #fef3c7; color: #92400e; }
+        .badge.low, .badge.minor { background: #d1fae5; color: #065f46; }
+        .badge.process { background: #dbeafe; color: #1e40af; }
+        .badge.resource { background: #ede9fe; color: #6b21a8; }
+        .badge.external { background: #fef3c7; color: #92400e; }
+        .badge.timewindow { background: #fee2e2; color: #991b1b; }
+        .chart-container { text-align: center; margin: 20px 0; }
+        .chart-container img { max-width: 100%; height: auto; border-radius: 8px; }
+        .recommendation { padding: 16px; border-left: 4px solid #3b82f6; background: #f9fafb; margin: 12px 0; border-radius: 0 8px 8px 0; }
+        .recommendation.critical { border-left-color: #ef4444; background: #fef2f2; }
+        .recommendation.high { border-left-color: #f59e0b; background: #fffbeb; }
+        .recommendation strong { color: #374151; }
+        .recommendation ul { margin: 8px 0 0 20px; }
+        .recommendation li { margin: 4px 0; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+        .footnote { font-size: 12px; color: #6b7280; margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e5e7eb; }
+        .alert { padding: 12px 16px; border-radius: 8px; margin: 16px 0; }
+        .alert.danger { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+        .footer { text-align: center; padding: 20px; color: #6b7280; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>SLA Violation Attribution Analysis Report</h1>
+            <div class="date">Data Period: 2024-04-19 ~ 2025-07-06</div>
+        </div>
+
+        <div class="card">
+            <h2>Executive Summary</h2>
+            <div class="metrics">
+                <div class="metric"><div class="value">8,977</div><div class="label">Total Tickets</div></div>
+                <div class="metric success"><div class="value">99.9%</div><div class="label">Response SLA</div></div>
+                <div class="metric danger"><div class="value">64.2%</div><div class="label">Resolution SLA</div></div>
+                <div class="metric danger"><div class="value">3,214</div><div class="label">Total Violations</div></div>
+                <div class="metric danger"><div class="value">4,423</div><div class="label">High Risk Tickets</div></div>
+            </div>
+            <div class="alert danger"><strong>Critical Alert:</strong> Resolution SLA (64.2%) is significantly below the 95% target. P1 Resolution SLA is only 6.9% and P2 is 15.5%. Immediate action required.</div>
+        </div>
+
+        <div class="card">
+            <h2>High Priority Analysis (P1/P2)</h2>
+            <p style="color: #6b7280; margin-bottom: 16px;">P1 and P2 incidents require immediate attention. SLA targets: P1 Response 15min/Resolution 2h, P2 Response 30min/Resolution 6h.</p>
+            <div class="grid-2">
+                <div>
+                    <h3>P1 Performance (Total: 448)</h3>
+                    <div class="metrics">
+                        <div class="metric success"><div class="value">98.9%</div><div class="label">Response SLA</div></div>
+                        <div class="metric danger"><div class="value">6.9%</div><div class="label">Resolution SLA</div></div>
+                    </div>
+                </div>
+                <div>
+                    <h3>P2 Performance (Total: 1346)</h3>
+                    <div class="metrics">
+                        <div class="metric success"><div class="value">99.7%</div><div class="label">Response SLA</div></div>
+                        <div class="metric danger"><div class="value">15.5%</div><div class="label">Resolution SLA</div></div>
+                    </div>
+                </div>
+            </div>
+            <div class="chart-container"><img src="images/p1_p2_analysis_EN.png" alt="P1/P2 Analysis"></div>
+        </div>
+
+        <div class="card">
+            <h2>Monthly Trend Analysis</h2>
+            <div class="chart-container"><img src="images/monthly_trend_EN.png" alt="Monthly Trend"></div>
+        </div>
+
+        <div class="card">
+            <h2>SLA Compliance by Priority</h2>
+            <div class="chart-container"><img src="images/sla_by_priority_EN.png" alt="SLA by Priority"></div>
+            <table>
+                <thead><tr><th>Priority</th><th>Response Target</th><th>Response SLA</th><th>Resolution Target</th><th>Resolution SLA</th><th>Total</th></tr></thead>
+                <tbody><tr><td><strong>P1</strong></td><td>15 min</td><td><span class="badge low">98.9%</span></td><td>2 h</td><td><span class="badge high">6.9%</span></td><td>448</td></tr><tr><td><strong>P2</strong></td><td>30 min</td><td><span class="badge low">99.7%</span></td><td>6 h</td><td><span class="badge high">15.5%</span></td><td>1,346</td></tr><tr><td><strong>P3</strong></td><td>45 min</td><td><span class="badge low">99.9%</span></td><td>24 h</td><td><span class="badge high">47.6%</span></td><td>3,141</td></tr><tr><td><strong>P4</strong></td><td>60 min</td><td><span class="badge low">100.0%</span></td><td>48 h</td><td><span class="badge low">99.7%</span></td><td>4,042</td></tr></tbody></table></div>
+
+        <div class="card">
+            <h2>Risk Analysis</h2>
+            <div class="chart-container"><img src="images/risk_distribution_EN.png" alt="Risk Distribution"></div>
+            <h3>High Risk Tickets (Top 10)</h3>
+            <p style="color: #6b7280; font-size: 13px; margin-bottom: 12px;">Tickets approaching or exceeding SLA threshold. "Exceed" shows hours over SLA target.</p>
+            <table>
+                <thead><tr><th>Ticket #</th><th>Priority</th><th>Category</th><th>Resolver</th><th>Actual</th><th>Target</th><th>Exceed</th><th>Attribution</th></tr></thead>
+                <tbody><tr><td>80000001</td><td>P4</td><td>Digital View Monitoring</td><td>Susan Smith</td><td>40.3h</td><td>48h</td><td><span class="badge low">0.0h</span></td><td><span class="badge timewindow">TimeWindow</span></td></tr><tr><td>80000005</td><td>P3</td><td>Digital View Monitoring</td><td>Jessica Smith</td><td>19.9h</td><td>24h</td><td><span class="badge low">0.0h</span></td><td><span class="badge resource">Resource</span></td></tr><tr><td>80000022</td><td>P3</td><td>Digital View Monitoring</td><td>Jennifer Smith</td><td>23.3h</td><td>24h</td><td><span class="badge low">0.0h</span></td><td><span class="badge resource">Resource</span></td></tr><tr><td>80000034</td><td>P4</td><td>Digital View Monitoring</td><td>Jessica Smith</td><td>44.2h</td><td>48h</td><td><span class="badge low">0.0h</span></td><td><span class="badge timewindow">TimeWindow</span></td></tr><tr><td>80000049</td><td>P3</td><td>Cardless Cash Out</td><td>Sarah Smith</td><td>21.1h</td><td>24h</td><td><span class="badge low">0.0h</span></td><td><span class="badge timewindow">TimeWindow</span></td></tr><tr><td>80000056</td><td>P3</td><td>Other</td><td>Lisa Smith</td><td>22.2h</td><td>24h</td><td><span class="badge low">0.0h</span></td><td><span class="badge resource">Resource</span></td></tr><tr><td>80000060</td><td>P3</td><td>Digital View Monitoring</td><td>Karen Smith</td><td>22.1h</td><td>24h</td><td><span class="badge low">0.0h</span></td><td><span class="badge resource">Resource</span></td></tr><tr><td>80000062</td><td>P4</td><td>Onboarding</td><td>Daniel Smith</td><td>43.8h</td><td>48h</td><td><span class="badge low">0.0h</span></td><td><span class="badge process">Process</span></td></tr><tr><td>80000073</td><td>P4</td><td>Bill Payment</td><td>Robert Smith</td><td>45.0h</td><td>48h</td><td><span class="badge low">0.0h</span></td><td><span class="badge timewindow">TimeWindow</span></td></tr><tr><td>80000076</td><td>P3</td><td>Digital View Monitoring</td><td>David Smith</td><td>22.6h</td><td>24h</td><td><span class="badge low">0.0h</span></td><td><span class="badge resource">Resource</span></td></tr></tbody></table></div>
+
+        <div class="card">
+            <h2>Violation Deep Dive</h2>
+            <div class="chart-container"><img src="images/severity_distribution_EN.png" alt="Severity"></div>
+            <h3>Top Violations by Severity (Total: 3,214)</h3>
+            <table>
+                <thead><tr><th>Ticket #</th><th>Priority</th><th>Category</th><th>Resolver</th><th>Resolution</th><th>Exceed</th><th>Attribution</th></tr></thead>
+                <tbody><tr><td>80007418</td><td>P2</td><td>Infra</td><td>Thomas Smith</td><td>9570.2h</td><td><span class="badge critical">+9564.2h</span></td><td><span class="badge resource">Resource</span></td></tr><tr><td>80002938</td><td>P1</td><td>Customer Complaint</td><td>David Smith</td><td>9459.2h</td><td><span class="badge critical">+9457.2h</span></td><td><span class="badge resource">Resource</span></td></tr><tr><td>80000956</td><td>P4</td><td>Other</td><td>Daniel Smith</td><td>9064.2h</td><td><span class="badge critical">+9016.2h</span></td><td><span class="badge timewindow">TimeWindow</span></td></tr><tr><td>80005518</td><td>P4</td><td>Compliance</td><td>Mary Smith</td><td>8438.3h</td><td><span class="badge critical">+8390.3h</span></td><td><span class="badge timewindow">TimeWindow</span></td></tr><tr><td>80006606</td><td>P2</td><td>Cash In</td><td>Thomas Smith</td><td>1605.5h</td><td><span class="badge critical">+1599.5h</span></td><td><span class="badge resource">Resource</span></td></tr><tr><td>80000772</td><td>P3</td><td>International Money Transfer</td><td>Linda Smith</td><td>1075.7h</td><td><span class="badge critical">+1051.7h</span></td><td><span class="badge resource">Resource</span></td></tr><tr><td>80007087</td><td>P3</td><td>Onboarding</td><td>Robert Smith</td><td>849.7h</td><td><span class="badge critical">+825.7h</span></td><td><span class="badge resource">Resource</span></td></tr><tr><td>80008807</td><td>P2</td><td>Compliance</td><td>Christopher Smith</td><td>746.8h</td><td><span class="badge critical">+740.8h</span></td><td><span class="badge resource">Resource</span></td></tr><tr><td>80002599</td><td>P1</td><td>Card</td><td>William Smith</td><td>620.9h</td><td><span class="badge critical">+618.9h</span></td><td><span class="badge process">Process</span></td></tr><tr><td>80001614</td><td>P3</td><td>Card</td><td>Jessica Smith</td><td>621.0h</td><td><span class="badge critical">+597.0h</span></td><td><span class="badge timewindow">TimeWindow</span></td></tr><tr><td>80004092</td><td>P4</td><td>Digital View Monitoring</td><td>Lisa Smith</td><td>533.0h</td><td><span class="badge critical">+485.0h</span></td><td><span class="badge process">Process</span></td></tr><tr><td>80000649</td><td>P3</td><td>Digital View Monitoring</td><td>Daniel Smith</td><td>491.5h</td><td><span class="badge critical">+467.5h</span></td><td><span class="badge timewindow">TimeWindow</span></td></tr><tr><td>80005948</td><td>P4</td><td>Cash Out</td><td>Patricia Smith</td><td>501.4h</td><td><span class="badge critical">+453.4h</span></td><td><span class="badge resource">Resource</span></td></tr><tr><td>80003571</td><td>P2</td><td>Card</td><td>Lisa Smith</td><td>455.1h</td><td><span class="badge critical">+449.1h</span></td><td><span class="badge process">Process</span></td></tr><tr><td>80002489</td><td>P4</td><td>Account Management</td><td>Daniel Smith</td><td>462.9h</td><td><span class="badge critical">+414.9h</span></td><td><span class="badge process">Process</span></td></tr></tbody></table></div>
+
+        <div class="card">
+            <h2>Attribution Analysis</h2>
+            <div class="chart-container"><img src="images/attribution_EN.png" alt="Attribution"></div>
+            <div class="metrics"><div class="metric"><div class="value" style="color: #3b82f6;">1,024</div><div class="label">Process (23%)</div></div><div class="metric"><div class="value" style="color: #8b5cf6;">692</div><div class="label">Resource (15%)</div></div><div class="metric"><div class="value" style="color: #f59e0b;">842</div><div class="label">External (19%)</div></div><div class="metric"><div class="value" style="color: #ef4444;">1,986</div><div class="label">TimeWindow (44%)</div></div></div>
+            <div class="footnote">Note: Attribution total (4,544) may differ from violation count (3,214) because a single ticket can have multiple contributing factors.</div>
+        </div>
+
+        <div class="card">
+            <h2>Violations by Category</h2>
+            <div class="chart-container"><img src="images/violations_by_category_EN.png" alt="Category"></div>
+        </div>
+
+        <div class="card">
+            <h2>Improvement Recommendations</h2><div class="recommendation critical"><strong>[CRITICAL] P1/P2 SLA Performance</strong><p>P1 Resolution SLA is at 6.9% (target: 95%). P2 is at 15.5%.</p><ul><li>Establish dedicated P1/P2 response team with <15min initial response</li><li>Implement automatic escalation after 50% SLA consumption</li><li>Create P1 war room protocol with multi-team coordination</li><li>Review P1/P2 classification criteria - ensure proper prioritization</li></ul></div><div class="recommendation critical"><strong>[CRITICAL] Time Window Factor (44% of violations)</strong><p>Majority of violations occur during off-hours (18:00-09:00) and weekends.</p><ul><li>Strengthen on-call coverage during 18:00-09:00 shift</li><li>Implement weekend duty rotation with dedicated escalation path</li><li>Consider automated triage and routing for off-hours tickets</li><li>Evaluate 24/7 NOC coverage for P1/P2 incidents</li></ul></div><div class="recommendation high"><strong>[HIGH] External Dependencies (19% of violations)</strong><p>Tickets pending on external teams or customers cause significant delays.</p><ul><li>Establish SLA agreements with dependent teams (internal OLAs)</li><li>Implement automated customer follow-up reminders</li><li>Create "pending external" dashboard for proactive management</li><li>Define escalation triggers when external wait exceeds threshold</li></ul></div><div class="recommendation high"><strong>[HIGH] Process Improvement (23% of violations)</strong><p>Reassignment and escalation delays contribute to SLA breaches.</p><ul><li>Reduce average reassignment count (target: <2 per ticket)</li><li>Implement skill-based routing to minimize transfers</li><li>Create clear escalation matrix with defined triggers</li><li>Train L1 team on better initial categorization</li></ul></div><div class="recommendation recommendation"><strong>[MEDIUM] Category Focus: Digital View Monitoring</strong><p>This category accounts for 1,480 violations (46% of total).</p><ul><li>Review monitoring alert thresholds to reduce false positives</li><li>Create runbooks for common scenarios</li><li>Consider automation for repetitive tasks</li></ul></div><div class="recommendation recommendation"><strong>[MEDIUM] Top Resolvers Workload</strong><p>Top resolver has 154 violations. Consider workload balancing.</p><ul><li>Review workload distribution across team members</li><li>Implement workload caps and automatic redistribution</li><li>Identify training needs for lower-performing resolvers</li></ul></div></div>
+
+        <div class="footer">Generated on 2026-01-28 23:05 | SLA Violation Attribution Analysis Report</div>
+    </div>
+</body>
+</html>
