@@ -302,7 +302,12 @@ class XlsxDetailAnalyzer:
                 res_sla = safe_divide(compliant.sum(), len(compliant))
                 violation = int((~compliant).sum())
             if "Response Time(m)" in grp.columns and str(priority) in self.sla_map:
-                resp_limit = self.sla_map[str(priority)].get("response_minutes", None)
+                sla_val = self.sla_map[str(priority)]
+                if isinstance(sla_val, dict):
+                    resp_limit = sla_val.get("response_minutes", None)
+                else:
+                    # sla_map stores resolution_hours as int; no response threshold
+                    resp_limit = None
                 if resp_limit is not None:
                     resp_ok = (grp["Response Time(m)"].dropna() <= resp_limit).sum()
                     resp_total = grp["Response Time(m)"].notna().sum()
@@ -369,8 +374,13 @@ class XlsxDetailAnalyzer:
         for _, row in non_compliant.iterrows():
             priority = str(row.get("Priority", "N/A"))
             rt = row.get("Resolution Time(m)", None)
-            sla_info = self.sla_map.get(priority, {})
-            res_limit_h = sla_info.get("resolution_hours", None)
+            sla_info = self.sla_map.get(priority, None)
+            if isinstance(sla_info, dict):
+                res_limit_h = sla_info.get("resolution_hours", None)
+            elif isinstance(sla_info, (int, float)):
+                res_limit_h = sla_info
+            else:
+                res_limit_h = None
 
             violation_type = "Resolution"
             overtime_str = "N/A"
@@ -703,7 +713,11 @@ class XlsxDetailAnalyzer:
                     p = str(r.get("Priority", ""))
                     resp_t = r.get("Response Time(m)", None)
                     if pd.notna(resp_t) and p in self.sla_map:
-                        lim = self.sla_map[p].get("response_minutes", None)
+                        sla_val = self.sla_map[p]
+                        if isinstance(sla_val, dict):
+                            lim = sla_val.get("response_minutes", None)
+                        else:
+                            lim = None  # sla_map stores resolution_hours, not response
                         if lim is not None:
                             resp_total += 1
                             if resp_t <= lim:
