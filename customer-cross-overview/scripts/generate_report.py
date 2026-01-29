@@ -66,7 +66,9 @@ def generate_reports_for_language(
     charts: dict,
     insights: dict,
     language: str,
-    all_output_paths: dict
+    all_output_paths: dict,
+    output_format: str = "all",
+    analyzer=None
 ) -> None:
     """Generate reports for a specific language."""
     lang_label = "ZH" if language == "zh" else "EN"
@@ -75,22 +77,44 @@ def generate_reports_for_language(
     print(f"\n  [{lang_label}] Building {lang_name} reports...")
 
     # HTML and DOCX
-    builder = ComprehensiveReportBuilder(result, charts, insights, language)
-    output_paths = builder.save()
+    if output_format in ("all", "html", "docx"):
+        builder = ComprehensiveReportBuilder(result, charts, insights, language)
+        output_paths = builder.save()
 
-    for fmt, path in output_paths.items():
-        key = f"{fmt}_{lang_label}"
-        all_output_paths[key] = path
-        print(f"    ✓ {fmt.upper()}: {Path(path).name}")
+        for fmt, path in output_paths.items():
+            key = f"{fmt}_{lang_label}"
+            all_output_paths[key] = path
+            print(f"    ✓ {fmt.upper()}: {Path(path).name}")
 
     # PPTX
-    try:
-        pptx_builder = PPTXBuilder(result, charts, insights, language)
-        pptx_path = pptx_builder.save()
-        all_output_paths[f"pptx_{lang_label}"] = pptx_path
-        print(f"    ✓ PPTX: {Path(pptx_path).name}")
-    except Exception as e:
-        print(f"    ⚠ PPTX generation skipped: {e}")
+    if output_format in ("all", "pptx"):
+        try:
+            pptx_builder = PPTXBuilder(result, charts, insights, language)
+            pptx_path = pptx_builder.save()
+            all_output_paths[f"pptx_{lang_label}"] = pptx_path
+            print(f"    ✓ PPTX: {Path(pptx_path).name}")
+        except Exception as e:
+            print(f"    ⚠ PPTX generation skipped: {e}")
+
+    # XLSX
+    if output_format in ("all", "xlsx") and analyzer is not None:
+        try:
+            from xlsx_builder import XlsxBuilder
+            xlsx_builder = XlsxBuilder(
+                result=result,
+                incidents_df=analyzer.incidents_df,
+                changes_df=analyzer.changes_df,
+                requests_df=analyzer.requests_df,
+                problems_df=analyzer.problems_df,
+                sla_map=analyzer.sla_map,
+                insights=insights,
+                language=language,
+            )
+            xlsx_path = xlsx_builder.save()
+            all_output_paths[f"xlsx_{lang_label}"] = xlsx_path
+            print(f"    ✓ XLSX: {Path(xlsx_path).name}")
+        except Exception as e:
+            print(f"    ⚠ XLSX generation skipped: {e}")
 
 
 def main():
@@ -103,6 +127,12 @@ def main():
         choices=["en", "zh", "both"],
         default="both",
         help="Output language (en=English, zh=Chinese, both=Both)"
+    )
+    parser.add_argument(
+        "--format", "-f",
+        choices=["all", "docx", "pptx", "html", "xlsx"],
+        default="all",
+        help="Output format (default: all)"
     )
     parser.add_argument(
         "--no-ai",
@@ -186,7 +216,8 @@ def main():
                     print("\n  ▶ Skipping AI insights (--no-ai)")
 
             # Generate reports
-            generate_reports_for_language(result, charts, insights, language, all_output_paths)
+            generate_reports_for_language(result, charts, insights, language, all_output_paths,
+                                          output_format=args.format, analyzer=analyzer)
 
         # Summary
         print()
