@@ -346,6 +346,262 @@ Month-over-Month Comparison: {'Available' if result.can_compare_mom else 'Not av
         return insight
     
     # =========================================================================
+    # XLSX-SPECIFIC INSIGHT GENERATORS (Sheets 2-10)
+    # =========================================================================
+
+    def generate_incident_detail_insight(self, result: ComprehensiveResult) -> str:
+        """Sheet 2: Incident detail — volume, priority, MTTR, category patterns."""
+        s = result.incident_summary
+        kpis = s.kpis if s else {}
+        sla = kpis.get("sla_rate")
+        mttr = kpis.get("avg_mttr")
+        p1_p2 = kpis.get("p1_p2_count")
+        context = f"""
+Total Incidents: {result.total_incidents}
+SLA Rate: {f'{sla.current_value:.1%}' if sla else 'N/A'}
+Avg MTTR: {f'{mttr.current_value:.1f}h' if mttr else 'N/A'}
+P1/P2 Count: {int(p1_p2.current_value) if p1_p2 else 'N/A'}
+Major Incidents: {len(result.major_incidents) if result.major_incidents else 0}
+"""
+        key = self._get_cache_key(f"incident_detail_{context}")
+        cached = self._get_cached(key)
+        if cached:
+            return cached
+        prompt = f"""基于以下事件详细数据，按照格式输出分析：
+📌 发现：[关键发现]
+🔍 原因：[数据驱动的原因分析]
+💡 建议：[具体改进措施]
+📈 预期：[量化的预期改进效果]
+
+数据：
+{context}"""
+        insight = self._call_ai(prompt)
+        self._cache_insight(key, insight)
+        return insight
+
+    def generate_sla_detail_insight(self, result: ComprehensiveResult) -> str:
+        """Sheet 3: SLA detail — SLA rates, violations."""
+        sla_info = ""
+        if result.sla_breakdown:
+            for sb in result.sla_breakdown[:5]:
+                sla_info += f"- {sb.process}: {sb.achieved_rate:.1%} (target {sb.target_rate:.1%})\n"
+        context = f"""
+Health Score: {result.health_score:.0f}/100
+SLA Breakdown:
+{sla_info if sla_info else 'N/A'}
+"""
+        key = self._get_cache_key(f"sla_detail_{context}")
+        cached = self._get_cached(key)
+        if cached:
+            return cached
+        prompt = f"""基于以下SLA详细数据，按照格式输出分析：
+📌 发现：[关键发现]
+🔍 原因：[数据驱动的原因分析]
+💡 建议：[具体改进措施]
+📈 预期：[量化的预期改进效果]
+
+数据：
+{context}"""
+        insight = self._call_ai(prompt)
+        self._cache_insight(key, insight)
+        return insight
+
+    def generate_change_detail_insight(self, result: ComprehensiveResult) -> str:
+        """Sheet 4: Change detail — success rate, failures."""
+        s = result.change_summary
+        kpis = s.kpis if s else {}
+        success = kpis.get("change_success_rate")
+        incident_rate = kpis.get("change_incident_rate")
+        context = f"""
+Total Changes: {result.total_changes}
+Success Rate: {f'{success.current_value:.1%}' if success else 'N/A'}
+Change-Induced Incident Rate: {f'{incident_rate.current_value:.1%}' if incident_rate else 'N/A'}
+Failed Changes: {len(result.failed_changes) if result.failed_changes else 0}
+"""
+        key = self._get_cache_key(f"change_detail_{context}")
+        cached = self._get_cached(key)
+        if cached:
+            return cached
+        prompt = f"""基于以下变更详细数据，按照格式输出分析：
+📌 发现：[关键发现]
+🔍 原因：[数据驱动的原因分析]
+💡 建议：[具体改进措施]
+📈 预期：[量化的预期改进效果]
+
+数据：
+{context}"""
+        insight = self._call_ai(prompt)
+        self._cache_insight(key, insight)
+        return insight
+
+    def generate_request_detail_insight(self, result: ComprehensiveResult) -> str:
+        """Sheet 5: Request detail — completion, CSAT."""
+        s = result.request_summary
+        kpis = s.kpis if s else {}
+        csat = kpis.get("request_csat")
+        sla = kpis.get("request_sla_rate")
+        context = f"""
+Total Requests: {result.total_requests}
+CSAT: {f'{csat.current_value:.2f}/5' if csat else 'N/A'}
+Request SLA Rate: {f'{sla.current_value:.1%}' if sla else 'N/A'}
+"""
+        key = self._get_cache_key(f"request_detail_{context}")
+        cached = self._get_cached(key)
+        if cached:
+            return cached
+        prompt = f"""基于以下服务请求详细数据，按照格式输出分析：
+📌 发现：[关键发现]
+🔍 原因：[数据驱动的原因分析]
+💡 建议：[具体改进措施]
+📈 预期：[量化的预期改进效果]
+
+数据：
+{context}"""
+        insight = self._call_ai(prompt)
+        self._cache_insight(key, insight)
+        return insight
+
+    def generate_problem_detail_insight(self, result: ComprehensiveResult) -> str:
+        """Sheet 6: Problem detail — closure, RCA."""
+        s = result.problem_summary
+        kpis = s.kpis if s else {}
+        closure = kpis.get("problem_closure_rate")
+        rca = kpis.get("rca_rate")
+        context = f"""
+Total Problems: {result.total_problems}
+Closure Rate: {f'{closure.current_value:.1%}' if closure else 'N/A'}
+RCA Rate: {f'{rca.current_value:.1%}' if rca else 'N/A'}
+Open Problems: {len(result.open_problems) if result.open_problems else 0}
+"""
+        key = self._get_cache_key(f"problem_detail_{context}")
+        cached = self._get_cached(key)
+        if cached:
+            return cached
+        prompt = f"""基于以下问题管理详细数据，按照格式输出分析：
+📌 发现：[关键发现]
+🔍 原因：[数据驱动的原因分析]
+💡 建议：[具体改进措施]
+📈 预期：[量化的预期改进效果]
+
+数据：
+{context}"""
+        insight = self._call_ai(prompt)
+        self._cache_insight(key, insight)
+        return insight
+
+    def generate_cross_process_insight(self, result: ComprehensiveResult) -> str:
+        """Sheet 7: Cross-process correlations."""
+        context = f"""
+Health Score: {result.health_score:.0f}/100 ({result.health_grade})
+Total Incidents: {result.total_incidents}
+Total Changes: {result.total_changes}
+Total Requests: {result.total_requests}
+Total Problems: {result.total_problems}
+Top Risks: {len(result.top_risks) if result.top_risks else 0}
+"""
+        key = self._get_cache_key(f"cross_process_{context}")
+        cached = self._get_cached(key)
+        if cached:
+            return cached
+        prompt = f"""基于以下跨流程数据，分析事件、变更、请求、问题之间的关联性，按照格式输出分析：
+📌 发现：[关键发现]
+🔍 原因：[数据驱动的原因分析]
+💡 建议：[具体改进措施]
+📈 预期：[量化的预期改进效果]
+
+数据：
+{context}"""
+        insight = self._call_ai(prompt)
+        self._cache_insight(key, insight)
+        return insight
+
+    def generate_personnel_insight(self, result: ComprehensiveResult) -> str:
+        """Sheet 8: Personnel — workload, skills."""
+        context = f"""
+Total Incidents: {result.total_incidents}
+Total Changes: {result.total_changes}
+Total Requests: {result.total_requests}
+Total Problems: {result.total_problems}
+Health Grade: {result.health_grade}
+"""
+        key = self._get_cache_key(f"personnel_{context}")
+        cached = self._get_cached(key)
+        if cached:
+            return cached
+        prompt = f"""基于以下工作量数据，分析人员负荷和技能需求，按照格式输出分析：
+📌 发现：[关键发现]
+🔍 原因：[数据驱动的原因分析]
+💡 建议：[具体改进措施]
+📈 预期：[量化的预期改进效果]
+
+数据：
+{context}"""
+        insight = self._call_ai(prompt)
+        self._cache_insight(key, insight)
+        return insight
+
+    def generate_time_analysis_insight(self, result: ComprehensiveResult) -> str:
+        """Sheet 9: Time patterns."""
+        s = result.incident_summary
+        kpis = s.kpis if s else {}
+        mttr = kpis.get("avg_mttr")
+        context = f"""
+Health Score: {result.health_score:.0f}/100
+Avg MTTR: {f'{mttr.current_value:.1f}h' if mttr else 'N/A'}
+Total Incidents: {result.total_incidents}
+WoW Comparison: {'Available' if result.can_compare_wow else 'N/A'}
+MoM Comparison: {'Available' if result.can_compare_mom else 'N/A'}
+"""
+        key = self._get_cache_key(f"time_analysis_{context}")
+        cached = self._get_cached(key)
+        if cached:
+            return cached
+        prompt = f"""基于以下时间维度数据，分析时间规律和趋势，按照格式输出分析：
+📌 发现：[关键发现]
+🔍 原因：[数据驱动的原因分析]
+💡 建议：[具体改进措施]
+📈 预期：[量化的预期改进效果]
+
+数据：
+{context}"""
+        insight = self._call_ai(prompt)
+        self._cache_insight(key, insight)
+        return insight
+
+    def generate_action_plan_insight(self, result: ComprehensiveResult) -> str:
+        """Sheet 10: Action plan summary."""
+        action_desc = ""
+        if result.actions:
+            for a in result.actions[:8]:
+                action_desc += f"- [{a.priority}] {a.action}\n"
+        risk_desc = ""
+        if result.top_risks:
+            for r in result.top_risks[:5]:
+                risk_desc += f"- [{r.priority}] {r.message}\n"
+        context = f"""
+Health Score: {result.health_score:.0f}/100 ({result.health_grade})
+Actions:
+{action_desc if action_desc else 'None'}
+Risks:
+{risk_desc if risk_desc else 'None'}
+"""
+        key = self._get_cache_key(f"action_plan_{context}")
+        cached = self._get_cached(key)
+        if cached:
+            return cached
+        prompt = f"""基于以下行动计划和风险数据，总结优先行动方案，按照格式输出分析：
+📌 发现：[关键发现]
+🔍 原因：[数据驱动的原因分析]
+💡 建议：[具体改进措施]
+📈 预期：[量化的预期改进效果]
+
+数据：
+{context}"""
+        insight = self._call_ai(prompt)
+        self._cache_insight(key, insight)
+        return insight
+
+    # =========================================================================
     # MAIN ENTRY POINT
     # =========================================================================
     
@@ -362,6 +618,15 @@ Month-over-Month Comparison: {'Available' if result.can_compare_mom else 'Not av
             "risk_insight": self.generate_risk_insight(result),
             "action_insight": self.generate_action_insight(result),
             "trend_insight": self.generate_trend_insight(result),
+            "incident_detail": self.generate_incident_detail_insight(result),
+            "sla_detail": self.generate_sla_detail_insight(result),
+            "change_detail": self.generate_change_detail_insight(result),
+            "request_detail": self.generate_request_detail_insight(result),
+            "problem_detail": self.generate_problem_detail_insight(result),
+            "cross_process": self.generate_cross_process_insight(result),
+            "personnel": self.generate_personnel_insight(result),
+            "time_analysis": self.generate_time_analysis_insight(result),
+            "action_plan": self.generate_action_plan_insight(result),
         }
         
         # Filter out empty insights
