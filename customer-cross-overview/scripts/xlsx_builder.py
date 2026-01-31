@@ -1,13 +1,11 @@
 """
 XLSX Builder for Comprehensive Quality Report.
-Creates a 10-sheet Excel workbook with data tables, embedded matplotlib charts,
+Creates a 10-sheet Excel workbook with data tables, native Excel charts,
 and AI-powered insights per sheet.
 """
 
 import io
 import os
-import tempfile
-import shutil
 import logging
 from pathlib import Path
 from datetime import datetime
@@ -16,38 +14,21 @@ from typing import Dict, List, Optional
 import openpyxl
 from openpyxl.drawing.image import Image as XlImage
 from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font
 
 from config import OUTPUT_DIR
 from analyzer import ComprehensiveResult
 from xlsx_theme import (
-    XlsxStyles, CHART_COLORS, ROW_HEIGHTS, COL_WIDTHS,
+    XlsxStyles, ROW_HEIGHTS, COL_WIDTHS,
     format_duration, format_pct, format_number,
-    sla_level, rating_text, efficiency_level, setup_chart_style,
+    sla_level, rating_text, efficiency_level,
+    CHART_ROWS_STANDARD, CHART_ROWS_SMALL, TAB_COLORS,
 )
 from xlsx_analyzer import (
     XlsxDetailAnalyzer, ActionPlanRow,
 )
-from xlsx_visualizer import (
-    chart_exec_health_gauge, chart_exec_process_radar, chart_exec_sparklines,
-    chart_inc_monthly_trend, chart_inc_priority_pie, chart_inc_category_top10,
-    chart_inc_mttr_boxplot, chart_inc_p1p2_trend,
-    chart_sla_gauge_response, chart_sla_gauge_resolution,
-    chart_sla_monthly_trend, chart_sla_violation_by_priority,
-    chart_sla_violation_heatmap,
-    chart_chg_type_pie, chart_chg_success_trend, chart_chg_category_bar,
-    chart_chg_incident_scatter, chart_chg_planning_accuracy,
-    chart_req_type_pie, chart_req_csat_bar, chart_req_monthly_trend,
-    chart_req_fulfillment_boxplot, chart_req_dept_heatmap,
-    chart_prb_status_funnel, chart_prb_rootcause_pie, chart_prb_monthly_bar,
-    chart_prb_impact_bubble, chart_prb_rca_trend,
-    chart_cross_sankey, chart_cross_radar, chart_cross_timeline,
-    chart_cross_heatmap,
-    chart_pers_workload_bar, chart_pers_load_boxplot, chart_pers_skill_heatmap,
-    chart_pers_efficiency_scatter, chart_pers_top10_radar,
-    chart_time_four_process_trend, chart_time_dow_bar, chart_time_hour_heatmap,
-    chart_time_quarterly, chart_time_forecast,
-    chart_action_priority_pie, chart_action_process_bar,
-)
+from xlsx_chart_native import NativeChartEngine
+from xlsx_chart_matplotlib import MatplotlibChartEngine
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +36,13 @@ logger = logging.getLogger(__name__)
 
 SHEET_NAMES = {
     "zh": [
-        "执行摘要", "事件分析", "事件SLA分析", "变更分析", "请求分析",
-        "问题分析", "跨流程关联分析", "人员与效率分析", "时间维度分析", "行动计划",
+        "执行摘要", "INC_事件分析", "INC_SLA分析", "CHG_变更分析", "SRQ_请求分析",
+        "PRO_问题分析", "CRO_跨流程关联", "CRO_人员与效率", "CRO_时间维度", "行动计划",
     ],
     "en": [
-        "Executive Summary", "Incident Analysis", "Incident SLA",
-        "Change Analysis", "Request Analysis", "Problem Analysis",
-        "Cross-Process", "Personnel & Efficiency", "Time Analysis",
+        "Executive Summary", "INC_Analysis", "INC_SLA",
+        "CHG_Analysis", "SRQ_Analysis", "PRO_Analysis",
+        "CRO_Cross-Process", "CRO_Personnel", "CRO_Time Analysis",
         "Action Plan",
     ],
 }
@@ -80,6 +61,7 @@ class XlsxBuilder:
         sla_map: Dict,
         insights: Dict[str, str],
         language: str = "en",
+        chart_engine: str = "native",
     ):
         self.result = result
         self.incidents_df = incidents_df
@@ -96,10 +78,8 @@ class XlsxBuilder:
             sla_map, result, language,
         )
         self.wb: Optional[openpyxl.Workbook] = None
-        self._tmp_dir = tempfile.mkdtemp(prefix="xlsx_charts_")
-        self._chart_counter = 0
-
-        setup_chart_style(language)
+        self.charts = None  # initialized in build() after wb is created
+        self.chart_engine_type = chart_engine  # "native" or "matplotlib"
 
     # ─── Utility methods ─────────────────────────────────────────────────
 
@@ -168,63 +148,187 @@ class XlsxBuilder:
         if col_widths:
             for ci, w in enumerate(col_widths, 1):
                 ws.column_dimensions[get_column_letter(ci)].width = w
+        else:
+            # Auto-width: measure header + data content
+            all_rows = [headers] + data
+            for ci in range(1, len(headers) + 1):
+                max_len = max(
+                    (len(str(r[ci - 1])) if ci - 1 < len(r) else 0 for r in all_rows),
+                    default=8,
+                )
+                ws.column_dimensions[get_column_letter(ci)].width = min(max(max_len + 4, 10), 50)
 
         # spacer
         ws.row_dimensions[row].height = ROW_HEIGHTS["spacer"]
         return row + 1
 
-    def _embed_chart(self, ws, png_bytes: bytes, row: int, col: int = 1) -> int:
-        """Embed a PNG chart image into the worksheet. Returns next row."""
-        if not png_bytes:
-            return row
+    def _write_chart_desc(self, ws, text: str, row: int) -> int:
+        """Write a brief one-line description before a chart."""
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
+        cell = ws.cell(row=row, column=1, value=text)
+        cell.font = Font(name="Calibri", size=9, italic=True, color="64748b")
+        cell.alignment = self.styles.align_left
+        ws.row_dimensions[row].height = 16
+        return row + 1
+
+    def _add_chart(self, ws, chart_fn, *args, row=None, small=False, **kwargs):
+        """Call a chart engine method, add result to worksheet. Returns next row.
+
+        Handles both native openpyxl chart objects and matplotlib PNG BytesIO.
+        For matplotlib PNGs, scales proportionally based on target height to
+        prevent overlapping while preserving aspect ratio.
+        """
+        if row is None:
+            raise ValueError("row must be specified")
         try:
-            self._chart_counter += 1
-            fname = os.path.join(self._tmp_dir, f"chart_{self._chart_counter}.png")
-            with open(fname, "wb") as f:
-                f.write(png_bytes)
-            img = XlImage(fname)
-            # Scale to ~750px wide
-            img.width = 750
-            img.height = int(img.height * (750 / max(img.width, 1)))
-            anchor = f"{get_column_letter(col)}{row}"
-            ws.add_image(img, anchor)
-            # Estimate rows consumed (approx 15px per row)
-            rows_consumed = max(1, img.height // 15)
-            return row + rows_consumed + 1
+            result = chart_fn(*args, **kwargs)
+            if result is None:
+                return row
+            anchor = f"A{row}"
+            if isinstance(result, io.BytesIO):
+                from xlsx_theme import CHART_SMALL_H, CHART_HEIGHT_CM
+                img = XlImage(result)
+                # Scale proportionally: control height, derive width from ratio
+                target_h_cm = CHART_SMALL_H if small else CHART_HEIGHT_CM
+                if img.width and img.height and img.height > 0:
+                    aspect = img.width / img.height
+                    # 1 cm ≈ 37.8 px in Excel's coordinate system
+                    target_h_px = target_h_cm * 37.8
+                    target_w_px = target_h_px * aspect
+                    img.width = target_w_px
+                    img.height = target_h_px
+                ws.add_image(img, anchor)
+            else:
+                # Native engine — openpyxl chart object
+                ws.add_chart(result, anchor)
+            rows_skip = CHART_ROWS_SMALL if small else CHART_ROWS_STANDARD
+            return row + rows_skip + 1
         except Exception as e:
-            logger.warning("Failed to embed chart: %s", e)
-            return row + 1
+            logger.warning("Chart %s failed: %s", getattr(chart_fn, '__name__', '?'), e)
+            return row
+
+    def _add_heatmap(self, ws, heatmap_fn, *args, row=None, **kwargs):
+        """Call a chart engine heatmap method. Returns next row.
+
+        Native engine: writes cells directly and returns next row int.
+        Matplotlib engine: returns BytesIO PNG, which we embed as an image.
+        """
+        if row is None:
+            raise ValueError("row must be specified")
+        try:
+            result = heatmap_fn(*args, **kwargs)
+            if result is None:
+                return row
+            if isinstance(result, io.BytesIO):
+                from xlsx_theme import CHART_HEIGHT_CM
+                img = XlImage(result)
+                target_h_cm = CHART_HEIGHT_CM
+                if img.width and img.height and img.height > 0:
+                    aspect = img.width / img.height
+                    target_h_px = target_h_cm * 37.8
+                    target_w_px = target_h_px * aspect
+                    img.width = target_w_px
+                    img.height = target_h_px
+                ws.add_image(img, f"A{row}")
+                return row + CHART_ROWS_STANDARD + 1
+            else:
+                # Native engine — result is the next row int
+                return result
+        except Exception as e:
+            logger.warning("Heatmap %s failed: %s", getattr(heatmap_fn, '__name__', '?'), e)
+            return row
 
     def _write_insight(self, ws, key: str, row: int) -> int:
-        """Write AI insight block. Returns next row."""
+        """Write AI insight block with styled formatting. Returns next row."""
         text = self.insights.get(key, "")
         if not text:
             return row
 
-        title_label = "AI Insight" if self.language == "en" else "AI 洞察"
-        row = self._write_section(ws, title_label, row)
+        # Spacer before insight
+        ws.row_dimensions[row].height = ROW_HEIGHTS["spacer"]
+        row += 1
+
+        # Insight title row with accent background
+        title_label = "🤖 AI Insight" if self.language == "en" else "🤖 AI 洞察分析"
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
+        cell = ws.cell(row=row, column=1, value=title_label)
+        cell.font = self.styles.font_insight_title
+        cell.fill = self.styles.fill_insight
+        cell.alignment = self.styles.align_left
+        ws.row_dimensions[row].height = ROW_HEIGHTS["h3"]
+        row += 1
 
         # Write insight text (may be multi-line)
         lines = text.strip().split("\n")
         for line in lines:
+            line = line.strip()
+            if not line:
+                ws.row_dimensions[row].height = 6
+                row += 1
+                continue
             ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
-            cell = ws.cell(row=row, column=1, value=line.strip())
-            cell.font = self.styles.font_insight_body
+            cell = ws.cell(row=row, column=1, value=line)
+            # Bold for lines starting with emoji markers
+            if line and line[0] in "📌🔍💡📈⚠":
+                cell.font = Font(name=self.styles.font_insight_body.name,
+                                 size=self.styles.font_insight_body.size,
+                                 bold=True,
+                                 color=self.styles.font_insight_title.color)
+            else:
+                cell.font = self.styles.font_insight_body
             cell.fill = self.styles.fill_insight
             cell.alignment = self.styles.align_wrap
-            ws.row_dimensions[row].height = ROW_HEIGHTS["insight"]
+            ws.row_dimensions[row].height = 30  # increased from 20pt for more room
             row += 1
 
         ws.row_dimensions[row].height = ROW_HEIGHTS["spacer"]
         return row + 1
 
-    def _safe_chart(self, chart_fn, *args, **kwargs) -> Optional[bytes]:
-        """Call a chart function, return None on failure."""
-        try:
-            return chart_fn(*args, **kwargs)
-        except Exception as e:
-            logger.warning("Chart %s failed: %s", chart_fn.__name__, e)
-            return None
+    def _write_footer(self, ws, row: int) -> int:
+        """Write footer with generation timestamp."""
+        ws.row_dimensions[row].height = ROW_HEIGHTS["spacer"]
+        row += 1
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        label = (f"Generated by Customer Cross-Overview Report • {ts}"
+                 if self.language == "en"
+                 else f"由客户跨流程总览报告生成 • {ts}")
+        cell = ws.cell(row=row, column=1, value=label)
+        cell.font = self.styles.font_footnote
+        cell.alignment = self.styles.align_center
+        return row + 1
+
+    def _write_kpi_cards(self, ws, cards: list, row: int) -> int:
+        """Write KPI summary cards in a row. cards = [(label, value, status), ...]
+        status = 'success'|'good'|'warning'|'danger'|'neutral'
+        Each card occupies 2 columns (label row + value row), up to 4 cards across.
+        """
+        col = 1
+        value_row = row
+        label_row = row + 1
+        for i, (label, value, status) in enumerate(cards):
+            if i > 0 and i % 4 == 0:
+                # New row of cards
+                value_row += 3
+                label_row = value_row + 1
+                col = 1
+            # Merge 2 cols for value
+            ws.merge_cells(start_row=value_row, start_column=col, end_row=value_row, end_column=col + 1)
+            vcell = ws.cell(row=value_row, column=col, value=str(value))
+            vcell.font = self.styles.font_kpi_val
+            vcell.alignment = self.styles.align_center
+            vcell.fill = self.styles.semantic_fill(status)
+            vcell.border = self.styles.border_kpi
+            # Label below
+            ws.merge_cells(start_row=label_row, start_column=col, end_row=label_row, end_column=col + 1)
+            lcell = ws.cell(row=label_row, column=col, value=label)
+            lcell.font = self.styles.font_kpi_label
+            lcell.alignment = self.styles.align_center
+            lcell.border = self.styles.border_kpi
+            ws.row_dimensions[value_row].height = 36
+            ws.row_dimensions[label_row].height = 18
+            col += 3  # gap between cards
+        return label_row + 2  # spacer after cards
 
     # ─── Sheet builders ──────────────────────────────────────────────────
 
@@ -247,35 +351,33 @@ class XlsxBuilder:
         headers = ["KPI", "Value", "Status"]
         data = [
             ["Health Score", format_number(r.health_score), r.health_grade],
-            ["Incident SLA Rate", format_pct(_kpi_val("incident_sla_rate")), rating_text(_kpi_val("incident_sla_rate"), self.language)],
-            ["MTTR", format_duration(_kpi_val("mttr") * 60, self.language), ""],
+            ["Incident SLA Rate", format_pct(_kpi_val("sla_rate")), rating_text(_kpi_val("sla_rate"), self.language)],
+            ["MTTR", format_duration(_kpi_val("avg_mttr") * 60, self.language), ""],
             ["Change Success Rate", format_pct(_kpi_val("change_success_rate")), rating_text(_kpi_val("change_success_rate"), self.language)],
-            ["Emergency Change Rate", format_pct(_kpi_val("emergency_change_rate")), ""],
-            ["Request Fulfillment", format_pct(_kpi_val("request_fulfillment_rate")), rating_text(_kpi_val("request_fulfillment_rate"), self.language)],
-            ["CSAT", f"{_kpi_val('csat'):.2f}", ""],
+            ["Emergency Change Rate", format_pct(_kpi_val("emergency_ratio")), ""],
+            ["Request Fulfillment", format_pct(_kpi_val("fulfillment_rate")), rating_text(_kpi_val("fulfillment_rate"), self.language)],
+            ["CSAT", f"{_kpi_val('request_csat'):.2f}", ""],
             ["Problem Closure Rate", format_pct(_kpi_val("problem_closure_rate")), rating_text(_kpi_val("problem_closure_rate"), self.language)],
         ]
-        row = self._write_table(ws, headers, data, row, [COL_WIDTHS["long_text"], COL_WIDTHS["short_text"], COL_WIDTHS["short_text"]])
+        row = self._write_table(ws, headers, data, row, [40, COL_WIDTHS["short_text"], COL_WIDTHS["short_text"]])
 
-        # Charts
-        png = self._safe_chart(chart_exec_health_gauge, r.health_score, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        # Table of Contents with hyperlinks
+        row = self._write_section(ws, "Contents" if self.language == "en" else "目录", row)
+        for i, name in enumerate(names):
+            cell = ws.cell(row=row, column=1, value=name)
+            cell.hyperlink = f"#{name}!A1"
+            cell.font = Font(color="3b82f6", underline="single", size=10)
+            row += 1
+        row += 1  # spacer
 
-        png = self._safe_chart(chart_exec_process_radar, r, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        # Visual Analysis section header
+        row = self._write_section(ws, "Visual Analysis" if self.language == "en" else "可视化分析", row)
 
-        trends_data = {}
-        if isinstance(r.trends, dict):
-            for k, v in r.trends.items():
-                if hasattr(v, "points"):
-                    trends_data[k] = [p.value for p in v.points] if v.points else []
-                else:
-                    trends_data[k] = []
-        png = self._safe_chart(chart_exec_sparklines, trends_data, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        # Charts: health gauge + radar (sparklines removed)
+        row = self._write_chart_desc(ws, "Overall health score gauge" if self.language == "en" else "整体健康评分仪表盘", row)
+        row = self._add_chart(ws, self.charts.chart_exec_health_gauge, r.health_score, row=row, small=True)
+        row = self._write_chart_desc(ws, "Process health radar across four ITIL processes" if self.language == "en" else "四大ITIL流程健康雷达图", row)
+        row = self._add_chart(ws, self.charts.chart_exec_process_radar, r, row=row)
 
         # Risk table
         if r.top_risks:
@@ -289,11 +391,15 @@ class XlsxBuilder:
                                     [COL_WIDTHS["short_text"], COL_WIDTHS["long_text"], COL_WIDTHS["long_text"], COL_WIDTHS["short_text"]])
 
         row = self._write_insight(ws, "executive_summary", row)
+        self._write_footer(ws, row)
 
     def _build_sheet_incidents(self, ws):
         """Sheet 2 — Incident Analysis."""
         names = SHEET_NAMES[self.language]
         row = self._write_title(ws, names[1])
+
+        # Section header for data tables
+        row = self._write_section(ws, "Data Tables" if self.language == "en" else "数据表格", row)
 
         # Priority breakdown
         priority_rows = self.detail.priority_breakdown()
@@ -325,48 +431,42 @@ class XlsxBuilder:
             ]
             row = self._write_table(ws, headers, data, row)
 
-        # Charts
+        # Visual Analysis section
+        row = self._write_section(ws, "Visual Analysis" if self.language == "en" else "可视化分析", row)
+
+        # Charts: monthly trend, priority pie, category top10 (removed mttr_boxplot, p1p2_trend)
         monthly = self.detail.monthly_trends()
-        png = self._safe_chart(chart_inc_monthly_trend, monthly, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_inc_priority_pie, priority_rows, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_inc_category_top10, category_rows, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_inc_mttr_boxplot, self.incidents_df, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_inc_p1p2_trend, monthly, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        row = self._write_chart_desc(ws, "Monthly incident volume with completion rate trend" if self.language == "en" else "月度事件量与完成率趋势", row)
+        row = self._add_chart(ws, self.charts.chart_inc_monthly_trend, monthly, row=row)
+        row = self._write_chart_desc(ws, "Incident distribution by priority level" if self.language == "en" else "按优先级分布的事件", row)
+        row = self._add_chart(ws, self.charts.chart_inc_priority_pie, priority_rows, row=row)
+        row = self._write_chart_desc(ws, "Top 10 incident categories by volume" if self.language == "en" else "事件量前10的分类", row)
+        row = self._add_chart(ws, self.charts.chart_inc_category_top10, category_rows, row=row)
 
         row = self._write_insight(ws, "incident_detail", row)
+        self._write_footer(ws, row)
 
     def _build_sheet_sla(self, ws):
         """Sheet 3 — SLA Analysis."""
         names = SHEET_NAMES[self.language]
         row = self._write_title(ws, names[2])
 
+        # Section header for data tables
+        row = self._write_section(ws, "Data Tables" if self.language == "en" else "数据表格", row)
+
         # SLA summary table from result.sla_breakdown
         sla_bd = self.result.sla_breakdown or []
         if sla_bd:
             row = self._write_section(ws, "SLA Summary" if self.language == "en" else "SLA 概览", row)
-            headers = ["Priority", "Response Rate", "Resolution Rate", "Total", "Violations"]
+            headers = ["Priority", "SLA Rate", "Total", "Compliant", "Target (h)"]
             data = []
             for s in sla_bd:
                 data.append([
                     getattr(s, "priority", ""),
-                    format_pct(getattr(s, "response_rate", 0)),
-                    format_pct(getattr(s, "resolution_rate", 0)),
+                    format_pct(getattr(s, "rate", 0)),
                     getattr(s, "total", 0),
-                    getattr(s, "violations", 0),
+                    getattr(s, "compliant", 0),
+                    getattr(s, "target", ""),
                 ])
             row = self._write_table(ws, headers, data, row)
 
@@ -393,45 +493,52 @@ class XlsxBuilder:
             ]
             row = self._write_table(ws, headers, data, row)
 
-        # Charts
+        # Visual Analysis section
+        row = self._write_section(ws, "Visual Analysis" if self.language == "en" else "可视化分析", row)
+
+        # Charts: SLA gauge (small), monthly, violation bar, heatmap
+        sla_bd = self.result.sla_breakdown or []
+        overall_rate = None
+        if sla_bd:
+            total_compliant = sum(getattr(s, "compliant", 0) for s in sla_bd)
+            total_count = sum(getattr(s, "total", 0) for s in sla_bd)
+            if total_count:
+                overall_rate = total_compliant / total_count
+        # Use one gauge for overall SLA instead of two separate resp/res gauges
+        row = self._write_chart_desc(ws, "Overall Resolution SLA compliance gauge" if self.language == "en" else "解决SLA合规仪表盘", row)
+        row = self._add_chart(ws, self.charts.chart_sla_gauge_resolution, overall_rate, row=row, small=True)
+
+        # Response SLA gauge (if data has response times)
         resp_rate = None
-        res_rate = None
-        priority_rows = self.detail.priority_breakdown()
-        if priority_rows:
-            total_resp = sum(p.count * p.response_sla_rate for p in priority_rows)
-            total_res = sum(p.count * p.resolution_sla_rate for p in priority_rows)
-            total_cnt = sum(p.count for p in priority_rows)
-            if total_cnt:
-                resp_rate = total_resp / total_cnt
-                res_rate = total_res / total_cnt
-
-        png = self._safe_chart(chart_sla_gauge_response, resp_rate, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_sla_gauge_resolution, res_rate, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
+        if hasattr(self.detail, 'inc') and not self.detail.inc.empty:
+            priority_rows_for_resp = self.detail.priority_breakdown()
+            resp_rates = [getattr(p, "response_sla_rate", 0) for p in priority_rows_for_resp]
+            resp_counts = [getattr(p, "count", 0) for p in priority_rows_for_resp]
+            total_count = sum(resp_counts)
+            if total_count > 0 and any(r > 0 for r in resp_rates):
+                resp_rate = sum(r * c for r, c in zip(resp_rates, resp_counts)) / total_count
+        if resp_rate is not None:
+            row = self._write_chart_desc(ws, "Overall Response SLA compliance gauge" if self.language == "en" else "响应SLA合规仪表盘", row)
+            row = self._add_chart(ws, self.charts.chart_sla_gauge_response, resp_rate, row=row, small=True)
         monthly = self.detail.monthly_trends()
-        png = self._safe_chart(chart_sla_monthly_trend, monthly, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_sla_violation_by_priority, priority_rows, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_sla_violation_heatmap, violations, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        row = self._write_chart_desc(ws, "Monthly SLA compliance rate vs target" if self.language == "en" else "月度SLA合规率与目标对比", row)
+        row = self._add_chart(ws, self.charts.chart_sla_monthly_trend, monthly, row=row)
+        row = self._write_chart_desc(ws, "SLA violations breakdown by priority" if self.language == "en" else "按优先级的SLA违规分布", row)
+        priority_rows = self.detail.priority_breakdown()
+        row = self._add_chart(ws, self.charts.chart_sla_violation_by_priority, priority_rows, row=row)
+        # Heatmap (writes cells directly)
+        row = self._add_heatmap(ws, self.charts.chart_sla_violation_heatmap, ws, violations, row, row=row)
 
         row = self._write_insight(ws, "sla_detail", row)
+        self._write_footer(ws, row)
 
     def _build_sheet_changes(self, ws):
         """Sheet 4 — Change Analysis."""
         names = SHEET_NAMES[self.language]
         row = self._write_title(ws, names[3])
+
+        # Section header for data tables
+        row = self._write_section(ws, "Data Tables" if self.language == "en" else "数据表格", row)
 
         # Change type table
         type_rows = self.detail.change_type_breakdown()
@@ -457,34 +564,28 @@ class XlsxBuilder:
             ]
             row = self._write_table(ws, headers, data, row)
 
-        # Charts
-        png = self._safe_chart(chart_chg_type_pie, type_rows, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        # Visual Analysis section
+        row = self._write_section(ws, "Visual Analysis" if self.language == "en" else "可视化分析", row)
 
+        # Charts: type pie, success trend, category bar (removed incident_scatter, planning_accuracy)
+        row = self._write_chart_desc(ws, "Change distribution by type" if self.language == "en" else "按类型分布的变更", row)
+        row = self._add_chart(ws, self.charts.chart_chg_type_pie, type_rows, row=row)
         monthly = self.detail.monthly_trends()
-        png = self._safe_chart(chart_chg_success_trend, monthly, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_chg_category_bar, cat_rows, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_chg_incident_scatter, self.changes_df, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_chg_planning_accuracy, monthly, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        row = self._write_chart_desc(ws, "Monthly change success rate trend" if self.language == "en" else "月度变更成功率趋势", row)
+        row = self._add_chart(ws, self.charts.chart_chg_success_trend, monthly, row=row)
+        row = self._write_chart_desc(ws, "Change volume and failures by category" if self.language == "en" else "按分类的变更量与失败数", row)
+        row = self._add_chart(ws, self.charts.chart_chg_category_bar, cat_rows, row=row)
 
         row = self._write_insight(ws, "change_detail", row)
+        self._write_footer(ws, row)
 
     def _build_sheet_requests(self, ws):
         """Sheet 5 — Request Analysis."""
         names = SHEET_NAMES[self.language]
         row = self._write_title(ws, names[4])
+
+        # Section header for data tables
+        row = self._write_section(ws, "Data Tables" if self.language == "en" else "数据表格", row)
 
         # Request type table
         type_rows = self.detail.request_type_breakdown()
@@ -509,34 +610,32 @@ class XlsxBuilder:
             ]
             row = self._write_table(ws, headers, data, row)
 
-        # Charts
-        png = self._safe_chart(chart_req_type_pie, type_rows, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        # Visual Analysis section
+        row = self._write_section(ws, "Visual Analysis" if self.language == "en" else "可视化分析", row)
 
-        png = self._safe_chart(chart_req_csat_bar, csat_rows, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
+        # Charts: all 4 + heatmap kept
+        row = self._write_chart_desc(ws, "Request distribution by type" if self.language == "en" else "按类型分布的请求", row)
+        row = self._add_chart(ws, self.charts.chart_req_type_pie, type_rows, row=row)
+        row = self._write_chart_desc(ws, "Customer satisfaction score distribution" if self.language == "en" else "客户满意度评分分布", row)
+        row = self._add_chart(ws, self.charts.chart_req_csat_bar, csat_rows, row=row)
         monthly = self.detail.monthly_trends()
-        png = self._safe_chart(chart_req_monthly_trend, monthly, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_req_fulfillment_boxplot, self.requests_df, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_req_dept_heatmap, self.requests_df, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        row = self._write_chart_desc(ws, "Monthly request volume and average CSAT" if self.language == "en" else "月度请求量与平均满意度", row)
+        row = self._add_chart(ws, self.charts.chart_req_monthly_trend, monthly, row=row)
+        row = self._write_chart_desc(ws, "Fulfillment time statistics by request type" if self.language == "en" else "按请求类型的完成时间统计", row)
+        row = self._add_chart(ws, self.charts.chart_req_fulfillment_bar, self.requests_df, row=row)
+        # Heatmap
+        row = self._add_heatmap(ws, self.charts.chart_req_dept_heatmap, ws, self.requests_df, row, row=row)
 
         row = self._write_insight(ws, "request_detail", row)
+        self._write_footer(ws, row)
 
     def _build_sheet_problems(self, ws):
         """Sheet 6 — Problem Analysis."""
         names = SHEET_NAMES[self.language]
         row = self._write_title(ws, names[5])
+
+        # Section header for data tables
+        row = self._write_section(ws, "Data Tables" if self.language == "en" else "数据表格", row)
 
         # Problem status table
         status_rows = self.detail.problem_status_breakdown()
@@ -561,34 +660,28 @@ class XlsxBuilder:
             ]
             row = self._write_table(ws, headers, data, row)
 
-        # Charts
-        png = self._safe_chart(chart_prb_status_funnel, status_rows, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        # Visual Analysis section
+        row = self._write_section(ws, "Visual Analysis" if self.language == "en" else "可视化分析", row)
 
-        png = self._safe_chart(chart_prb_rootcause_pie, rc_rows, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
+        # Charts: status funnel, rootcause pie, monthly bar (removed impact_bubble)
+        row = self._write_chart_desc(ws, "Problem status funnel distribution" if self.language == "en" else "问题状态漏斗分布", row)
+        row = self._add_chart(ws, self.charts.chart_prb_status_funnel, status_rows, row=row)
+        row = self._write_chart_desc(ws, "Root cause category distribution" if self.language == "en" else "根因分类分布", row)
+        row = self._add_chart(ws, self.charts.chart_prb_rootcause_pie, rc_rows, row=row)
         monthly = self.detail.monthly_trends()
-        png = self._safe_chart(chart_prb_monthly_bar, monthly, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_prb_impact_bubble, self.problems_df, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_prb_rca_trend, monthly, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        row = self._write_chart_desc(ws, "Monthly problem volume with cumulative trend" if self.language == "en" else "月度问题量与累计趋势", row)
+        row = self._add_chart(ws, self.charts.chart_prb_monthly_bar, monthly, row=row)
 
         row = self._write_insight(ws, "problem_detail", row)
+        self._write_footer(ws, row)
 
     def _build_sheet_cross_process(self, ws):
         """Sheet 7 — Cross-Process Analysis."""
         names = SHEET_NAMES[self.language]
         row = self._write_title(ws, names[6])
+
+        # Section header for data tables
+        row = self._write_section(ws, "Data Tables" if self.language == "en" else "数据表格", row)
 
         # Change -> Incident links
         chg_links = self.detail.change_incident_links()
@@ -601,40 +694,23 @@ class XlsxBuilder:
             ]
             row = self._write_table(ws, headers, data, row)
 
-        # Problem -> Incident links
-        prb_links = self.detail.problem_incident_links()
-        if prb_links:
-            row = self._write_section(ws, "Problem → Incident Links" if self.language == "en" else "问题→事件关联", row)
-            headers = ["Source ID", "Type", "Target Count", "Target IDs", "Impact"]
-            data = [
-                [l.source_id, l.source_type, l.target_count, l.target_ids, l.impact]
-                for l in prb_links[:20]
-            ]
-            row = self._write_table(ws, headers, data, row)
+        # Visual Analysis section
+        row = self._write_section(ws, "Visual Analysis" if self.language == "en" else "可视化分析", row)
 
-        # Charts
-        png = self._safe_chart(chart_cross_sankey, chg_links, prb_links, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_cross_radar, [], self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_cross_timeline, chg_links, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_cross_heatmap, None, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        # Charts: flow bar only (removed timeline)
+        row = self._write_chart_desc(ws, "Cross-process flow: changes causing incidents" if self.language == "en" else "跨流程关联: 变更导致的事件", row)
+        row = self._add_chart(ws, self.charts.chart_cross_flow_bar, chg_links, None, row=row)
 
         row = self._write_insight(ws, "cross_process", row)
+        self._write_footer(ws, row)
 
     def _build_sheet_personnel(self, ws):
         """Sheet 8 — Personnel & Efficiency."""
         names = SHEET_NAMES[self.language]
         row = self._write_title(ws, names[7])
+
+        # Section header for data tables
+        row = self._write_section(ws, "Data Tables" if self.language == "en" else "数据表格", row)
 
         # Personnel table
         personnel = self.detail.personnel_breakdown()
@@ -674,33 +750,27 @@ class XlsxBuilder:
             ]
             row = self._write_table(ws, headers, data, row)
 
-        # Charts
-        png = self._safe_chart(chart_pers_workload_bar, personnel, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        # Visual Analysis section
+        row = self._write_section(ws, "Visual Analysis" if self.language == "en" else "可视化分析", row)
 
-        png = self._safe_chart(chart_pers_load_boxplot, personnel, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_pers_skill_heatmap, self.incidents_df, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_pers_efficiency_scatter, personnel, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_pers_top10_radar, personnel, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        # Charts: top10 bar, performance matrix, skill heatmap
+        row = self._write_chart_desc(ws, "Top 10 personnel by ticket volume" if self.language == "en" else "工单量前10的人员", row)
+        row = self._add_chart(ws, self.charts.chart_pers_top10_bar, personnel, row=row)
+        row = self._write_chart_desc(ws, "Performance Matrix (Volume vs MTTR)" if self.language == "en" else "绩效矩阵 (工单量 vs 平均解决时间)", row)
+        row = self._add_chart(ws, self.charts.chart_pers_performance_matrix, personnel, row=row)
+        # Heatmap (uses "Resolver" column)
+        row = self._add_heatmap(ws, self.charts.chart_pers_skill_heatmap, ws, self.incidents_df, row, row=row)
 
         row = self._write_insight(ws, "personnel", row)
+        self._write_footer(ws, row)
 
     def _build_sheet_time(self, ws):
         """Sheet 9 — Time Analysis."""
         names = SHEET_NAMES[self.language]
         row = self._write_title(ws, names[8])
+
+        # Section header for data tables
+        row = self._write_section(ws, "Data Tables" if self.language == "en" else "数据表格", row)
 
         # Monthly trends table
         monthly = self.detail.monthly_trends()
@@ -742,33 +812,27 @@ class XlsxBuilder:
             ]
             row = self._write_table(ws, headers, data, row)
 
-        # Charts
-        png = self._safe_chart(chart_time_four_process_trend, monthly, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        # Visual Analysis section
+        row = self._write_section(ws, "Visual Analysis" if self.language == "en" else "可视化分析", row)
 
-        png = self._safe_chart(chart_time_dow_bar, dow, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_time_hour_heatmap, self.incidents_df, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_time_quarterly, monthly, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
-
-        png = self._safe_chart(chart_time_forecast, monthly, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        # Charts: four-process trend, dow bar, hour heatmap (removed quarterly, forecast)
+        row = self._write_chart_desc(ws, "Four ITIL process volume trends over time" if self.language == "en" else "四大ITIL流程量时间趋势", row)
+        row = self._add_chart(ws, self.charts.chart_time_four_process_trend, monthly, row=row)
+        row = self._write_chart_desc(ws, "Incident volume by day of week" if self.language == "en" else "按星期分布的事件量", row)
+        row = self._add_chart(ws, self.charts.chart_time_dow_bar, dow, row=row)
+        # Heatmap
+        row = self._add_heatmap(ws, self.charts.chart_time_hour_heatmap, ws, self.incidents_df, row, row=row)
 
         row = self._write_insight(ws, "time_analysis", row)
+        self._write_footer(ws, row)
 
     def _build_sheet_actions(self, ws):
         """Sheet 10 — Action Plan."""
         names = SHEET_NAMES[self.language]
         row = self._write_title(ws, names[9])
+
+        # Section header for data tables
+        row = self._write_section(ws, "Data Tables" if self.language == "en" else "数据表格", row)
 
         # Build ActionPlanRow list from result.actions
         actions = self.result.actions or []
@@ -804,22 +868,27 @@ class XlsxBuilder:
             ]
             row = self._write_table(ws, headers, data, row)
 
-        # Charts
-        png = self._safe_chart(chart_action_priority_pie, action_plan_rows, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        # Visual Analysis section
+        row = self._write_section(ws, "Visual Analysis" if self.language == "en" else "可视化分析", row)
 
-        png = self._safe_chart(chart_action_process_bar, action_plan_rows, self.language)
-        if png:
-            row = self._embed_chart(ws, png, row)
+        # Charts: both kept
+        row = self._write_chart_desc(ws, "Action items by priority level" if self.language == "en" else "按优先级的行动项", row)
+        row = self._add_chart(ws, self.charts.chart_action_priority_pie, action_plan_rows, row=row)
+        row = self._write_chart_desc(ws, "Action items by source process" if self.language == "en" else "按源流程的行动项", row)
+        row = self._add_chart(ws, self.charts.chart_action_process_bar, action_plan_rows, row=row)
 
         row = self._write_insight(ws, "action_plan", row)
+        self._write_footer(ws, row)
 
     # ─── Build & Save ────────────────────────────────────────────────────
 
     def build(self) -> openpyxl.Workbook:
         """Create the workbook with all 10 sheets."""
         self.wb = openpyxl.Workbook()
+        if self.chart_engine_type == "matplotlib":
+            self.charts = MatplotlibChartEngine(self.wb, self.language)
+        else:
+            self.charts = NativeChartEngine(self.wb, self.language)
         names = SHEET_NAMES[self.language]
 
         builders = [
@@ -842,6 +911,9 @@ class XlsxBuilder:
             else:
                 ws = self.wb.create_sheet(title=name)
 
+            # Set tab color
+            ws.sheet_properties.tabColor = TAB_COLORS[i]
+
             try:
                 builder(ws)
             except Exception as e:
@@ -860,22 +932,18 @@ class XlsxBuilder:
         return self.wb
 
     def save(self, filename: str = None) -> Path:
-        """Build workbook, save to OUTPUT_DIR, clean up temp files, return path."""
+        """Build workbook, save to OUTPUT_DIR, return path."""
         if self.wb is None:
             self.build()
 
         if filename is None:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"Comprehensive_Quality_Report_{ts}.xlsx"
+            suffix = "CN" if self.language == "zh" else "EN"
+            engine_suffix = "matplotlib_chart" if self.chart_engine_type == "matplotlib" else "native_chart"
+            filename = f"Comprehensive_Quality_Report_{ts}_{suffix}_{engine_suffix}.xlsx"
 
         output_path = OUTPUT_DIR / filename
         self.wb.save(str(output_path))
-
-        # Clean up temp chart images
-        try:
-            shutil.rmtree(self._tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
 
         logger.info("Report saved to %s", output_path)
         return output_path

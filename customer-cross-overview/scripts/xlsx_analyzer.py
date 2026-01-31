@@ -97,6 +97,7 @@ class SLAViolation:
     resolver: str
     status: str
     reason: str
+    month: str = ""
 
 
 @dataclass
@@ -120,6 +121,7 @@ class MonthlyTrend:
     high_priority_pct: float = 0.0
     mom_change: str = "N/A"
     assessment: str = ""
+    change_success_rate: float = 0.0
 
 
 @dataclass
@@ -293,25 +295,35 @@ class XlsxDetailAnalyzer:
             rt = _safe_col(grp, "Resolution Time(m)")
             rt_valid = rt.dropna()
 
-            # SLA rates
+            # SLA rates — compute from Resolution Time(m) vs sla_map threshold
             resp_sla = 0.0
             res_sla = 0.0
             violation = 0
-            if "SLA Compliant" in grp.columns:
-                compliant = _bool_col(grp["SLA Compliant"])
-                res_sla = safe_divide(compliant.sum(), len(compliant))
-                violation = int((~compliant).sum())
-            if "Response Time(m)" in grp.columns and str(priority) in self.sla_map:
-                sla_val = self.sla_map[str(priority)]
+
+            sla_val = self.sla_map.get(str(priority))
+            if sla_val is not None:
                 if isinstance(sla_val, dict):
-                    resp_limit = sla_val.get("response_minutes", None)
+                    sla_minutes = sla_val.get("resolution_hours", 24) * 60
                 else:
-                    # sla_map stores resolution_hours as int; no response threshold
-                    resp_limit = None
-                if resp_limit is not None:
-                    resp_ok = (grp["Response Time(m)"].dropna() <= resp_limit).sum()
-                    resp_total = grp["Response Time(m)"].notna().sum()
-                    resp_sla = safe_divide(resp_ok, resp_total)
+                    sla_minutes = float(sla_val) * 60
+
+                if "Resolution Time(m)" in grp.columns:
+                    rt_vals = grp["Resolution Time(m)"].dropna()
+                    compliant_count = (rt_vals <= sla_minutes).sum()
+                    res_sla = safe_divide(compliant_count, len(rt_vals))
+                    violation = int((rt_vals > sla_minutes).sum())
+
+                # Response SLA (if Response Time(m) exists and has non-zero values)
+                if "Response Time(m)" in grp.columns:
+                    resp_vals = grp["Response Time(m)"].dropna()
+                    resp_vals = resp_vals[resp_vals > 0]  # skip zeros (no response tracking)
+                    if len(resp_vals) > 0:
+                        if isinstance(sla_val, dict):
+                            resp_limit = sla_val.get("response_minutes")
+                        else:
+                            resp_limit = None
+                        if resp_limit is not None:
+                            resp_sla = safe_divide((resp_vals <= resp_limit).sum(), len(resp_vals))
 
             rows.append(PriorityRow(
                 priority=str(priority),
@@ -368,43 +380,46 @@ class XlsxDetailAnalyzer:
             return []
         df = self.inc
         violations: List[SLAViolation] = []
-        if "SLA Compliant" not in df.columns:
+        if "Resolution Time(m)" not in df.columns:
             return []
-        non_compliant = df[~_bool_col(df["SLA Compliant"])]
-        for _, row in non_compliant.iterrows():
-            priority = str(row.get("Priority", "N/A"))
+        # Find violations: Resolution Time(m) > SLA threshold
+        for _, row in df.iterrows():
+            priority = str(row.get("Priority", "P3"))
             rt = row.get("Resolution Time(m)", None)
-            sla_info = self.sla_map.get(priority, None)
-            if isinstance(sla_info, dict):
-                res_limit_h = sla_info.get("resolution_hours", None)
-            elif isinstance(sla_info, (int, float)):
-                res_limit_h = sla_info
-            else:
-                res_limit_h = None
+            if rt is None or pd.isna(rt):
+                continue
+            sla_val = self.sla_map.get(priority)
+            if sla_val is None:
+                continue
+            sla_minutes = float(sla_val) * 60 if not isinstance(sla_val, dict) else sla_val.get("resolution_hours", 24) * 60
+            if rt <= sla_minutes:
+                continue  # compliant, skip
+            over = rt - sla_minutes
+            overtime_str = format_duration(over, self.lang)
+            reason = f"Resolution exceeded by {overtime_str}"
 
-            violation_type = "Resolution"
-            overtime_str = "N/A"
-            reason = ""
-            if rt is not None and not pd.isna(rt) and res_limit_h is not None:
-                limit_min = res_limit_h * 60
-                over = rt - limit_min
-                if over > 0:
-                    overtime_str = format_duration(over, self.lang)
-                    reason = f"Resolution exceeded by {format_duration(over, self.lang)}"
-                else:
-                    reason = "SLA marked non-compliant"
-            else:
-                reason = "SLA marked non-compliant"
+            # Extract month from incident date for heatmap
+            month_str = ""
+            for date_col in ["Begin Date", "begin_date", "Created Date"]:
+                if date_col in row.index:
+                    try:
+                        dt = pd.to_datetime(row[date_col])
+                        if pd.notna(dt):
+                            month_str = dt.strftime("%Y-%m")
+                    except Exception:
+                        pass
+                    break
 
             violations.append(SLAViolation(
                 order_number=str(row.get("Order Number", "N/A")),
                 priority=priority,
                 category=str(row.get("Category", "N/A")),
-                violation_type=violation_type,
+                violation_type="Resolution",
                 overtime=overtime_str,
                 resolver=str(row.get("Resolver", "N/A")),
                 status=str(row.get("Order Status", "N/A")),
                 reason=reason,
+                month=month_str,
             ))
         return violations
 
@@ -704,8 +719,19 @@ class XlsxDetailAnalyzer:
             # SLA rates
             resp_sla = 0.0
             res_sla = 0.0
-            if "SLA Compliant" in grp.columns:
-                res_sla = safe_divide(_bool_col(grp["SLA Compliant"]).sum(), cnt)
+            if "Resolution Time(m)" in grp.columns and "Priority" in grp.columns:
+                res_ok = 0
+                res_total = 0
+                for _, r in grp.iterrows():
+                    p = str(r.get("Priority", ""))
+                    rt_val = r.get("Resolution Time(m)", None)
+                    if pd.notna(rt_val) and p in self.sla_map:
+                        sla_val = self.sla_map[p]
+                        sla_min = float(sla_val) * 60 if not isinstance(sla_val, dict) else sla_val.get("resolution_hours", 24) * 60
+                        res_total += 1
+                        if rt_val <= sla_min:
+                            res_ok += 1
+                res_sla = safe_divide(res_ok, res_total)
             if "Response Time(m)" in grp.columns and "Priority" in grp.columns:
                 resp_ok = 0
                 resp_total = 0
@@ -852,13 +878,32 @@ class XlsxDetailAnalyzer:
                     if "Resolution Time(m)" in grp.columns:
                         rt = grp["Resolution Time(m)"].dropna()
                         periods[month].avg_resolution_min = float(rt.mean()) if len(rt) else 0.0
-                    if "SLA Compliant" in grp.columns:
-                        periods[month].completion_rate = safe_divide(
-                            _bool_col(grp["SLA Compliant"]).sum(), len(grp)
-                        )
+                    if "Resolution Time(m)" in grp.columns:
+                        compliant = 0
+                        total_with_rt = 0
+                        for _, r in grp.iterrows():
+                            p = str(r.get("Priority", "P3"))
+                            rt_val = r.get("Resolution Time(m)")
+                            if pd.notna(rt_val):
+                                total_with_rt += 1
+                                sla_v = self.sla_map.get(p)
+                                if sla_v is not None:
+                                    sla_min = float(sla_v) * 60 if not isinstance(sla_v, dict) else sla_v.get("resolution_hours", 24) * 60
+                                    if rt_val <= sla_min:
+                                        compliant += 1
+                        periods[month].completion_rate = safe_divide(compliant, total_with_rt)
                     if "Priority" in grp.columns:
                         hp = grp["Priority"].astype(str).str.strip().str.upper().isin(["P1", "P2", "1", "2", "HIGH", "CRITICAL"])
                         periods[month].high_priority_pct = safe_divide(hp.sum(), len(grp))
+
+        # Compute change success rate per month
+        if _nonempty(self.chg) and "Requested Date" in self.chg.columns and "Success" in self.chg.columns:
+            df_chg = self.chg.copy()
+            df_chg["_month"] = pd.to_datetime(df_chg["Requested Date"], errors="coerce").dt.strftime("%Y-%m")
+            for month, grp in df_chg.groupby("_month", sort=False):
+                if month in periods:
+                    success = _bool_col(grp["Success"]).sum()
+                    periods[month].change_success_rate = safe_divide(success, len(grp))
 
         sorted_keys = sorted(periods.keys())
         prev_inc = None

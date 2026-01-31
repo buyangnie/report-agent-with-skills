@@ -8,6 +8,7 @@ Spec reference: REQUIREMENTS-xlsx-report.md Section 六
 """
 
 import platform
+import math
 from typing import Dict, Tuple, Optional
 
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -17,14 +18,27 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 # =============================================================================
 
 def _detect_cjk_font() -> str:
-    """Return the best available CJK font for the current platform."""
+    """Return the best available CJK font for the current platform.
+
+    Uses platform detection with fallback chain.  Fonts are checked against
+    matplotlib's font_manager so we only return names matplotlib can resolve.
+    """
+    import matplotlib.font_manager as fm
+
     system = platform.system()
     if system == "Darwin":
-        return "PingFang SC"
+        candidates = ["Hiragino Sans GB", "Heiti TC", "Arial Unicode MS", "PingFang SC"]
     elif system == "Windows":
-        return "Microsoft YaHei"
+        candidates = ["Microsoft YaHei", "SimHei", "SimSun", "Arial Unicode MS"]
     else:
-        return "WenQuanYi Micro Hei"
+        candidates = ["WenQuanYi Micro Hei", "Noto Sans CJK SC", "Droid Sans Fallback"]
+
+    available = {f.name for f in fm.fontManager.ttflist}
+    for name in candidates:
+        if name in available:
+            return name
+    # Last resort – DejaVu Sans ships with matplotlib but has no CJK glyphs.
+    return "Arial"
 
 
 def get_fonts(language: str = "en") -> Dict[str, str]:
@@ -41,8 +55,8 @@ def get_fonts(language: str = "en") -> Dict[str, str]:
 
 FONT_SIZES: Dict[str, int] = {
     "h1": 18,
-    "h2": 11,
-    "h3": 13,
+    "h2": 14,
+    "h3": 12,
     "th": 10,
     "td": 10,
     "kpi_value": 24,
@@ -88,10 +102,44 @@ TREND_POSITIVE = "166534"
 TREND_NEGATIVE = "991b1b"
 TREND_NEUTRAL  = "64748b"
 
-# Chart color sequence (with # prefix for matplotlib)
-CHART_COLORS = [
-    "#3b82f6", "#22c55e", "#eab308", "#ef4444",
-    "#8b5cf6", "#06b6d4", "#f97316", "#ec4899",
+# Chart colors for openpyxl native charts (no # prefix, 6-digit hex)
+CHART_COLORS_HEX = [
+    "3b82f6", "22c55e", "eab308", "ef4444",
+    "8b5cf6", "06b6d4", "f97316", "ec4899",
+    "14b8a6", "a855f7", "f43f5e", "84cc16",
+]
+
+# Native chart sizing (in cm for openpyxl)
+CHART_WIDTH_CM  = 18        # standard chart width
+CHART_HEIGHT_CM = 12        # standard chart height
+CHART_SMALL_W   = 9         # small chart (gauge, sparkline)
+CHART_SMALL_H   = 8         # small chart height
+
+# Row computation for chart placement
+DEFAULT_ROW_HEIGHT_PT = 15.0  # Excel default row height in points
+CM_PER_PT = 0.0353            # centimeters per point
+
+def rows_for_chart(height_cm: float) -> int:
+    """Compute rows consumed by a chart of given height in cm."""
+    row_height_cm = DEFAULT_ROW_HEIGHT_PT * CM_PER_PT
+    return int(math.ceil(height_cm / row_height_cm)) + 2  # +2 padding
+
+CHART_ROWS_STANDARD = rows_for_chart(CHART_HEIGHT_CM)  # ~25 for 12cm
+CHART_ROWS_SMALL    = rows_for_chart(CHART_SMALL_H)    # ~17 for 8cm
+CHART_ROWS_CONSUMED = CHART_ROWS_STANDARD              # backwards compat
+
+# Tab colors for each sheet
+TAB_COLORS = [
+    "1e3a5f",  # Executive: dark blue
+    "3b82f6",  # Incidents: blue
+    "ef4444",  # SLA: red
+    "22c55e",  # Changes: green
+    "8b5cf6",  # Requests: purple
+    "eab308",  # Problems: yellow
+    "06b6d4",  # Cross-process: cyan
+    "f97316",  # Personnel: orange
+    "ec4899",  # Time: pink
+    "14b8a6",  # Actions: teal
 ]
 
 # AI Insight block colors
@@ -309,43 +357,3 @@ def format_number(value) -> str:
         return "N/A"
     return f"{int(value):,}"
 
-
-# =============================================================================
-# Matplotlib Chart Style Setup
-# =============================================================================
-
-def setup_chart_style(language: str = "en"):
-    """Configure matplotlib rcParams for chart styling per requirements 6.8."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    font_family = _detect_cjk_font() if language == "zh" else "Calibri"
-
-    plt.rcParams.update({
-        "figure.facecolor": "#ffffff",
-        "axes.facecolor": "#ffffff",
-        "axes.edgecolor": f"#{BORDER_LIGHT}",
-        "axes.labelcolor": f"#{TEXT_PRIMARY}",
-        "axes.grid": True,
-        "grid.color": f"#{BORDER_LIGHT}",
-        "grid.linestyle": "--",
-        "grid.linewidth": 0.5,
-        "font.family": ["sans-serif"],
-        "font.sans-serif": [font_family, "Arial", "DejaVu Sans"],
-        "font.size": 10,
-        "axes.titlesize": 13,
-        "axes.titleweight": "bold",
-        "axes.labelsize": 10,
-        "xtick.labelsize": 9,
-        "ytick.labelsize": 9,
-        "legend.fontsize": 10,
-        "legend.frameon": False,
-        "figure.dpi": 150,
-        "savefig.dpi": 150,
-        "savefig.bbox": "tight",
-        "savefig.pad_inches": 0.15,
-    })
-
-    import warnings
-    warnings.filterwarnings("ignore", message="Glyph.*missing from font")

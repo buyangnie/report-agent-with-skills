@@ -3,7 +3,7 @@
 Customer Quality Report Generator - Comprehensive Version.
 
 Integrates all 4 ITIL processes: Incidents, Changes, Requests, Problems.
-Supports bilingual output (English and Chinese) for HTML, DOCX, and PPTX.
+Outputs a 10-sheet XLSX workbook with native Excel charts and AI insights.
 
 Usage:
     python generate_report.py                    # Generate both EN and ZH
@@ -15,7 +15,6 @@ Usage:
 import argparse
 import sys
 from pathlib import Path
-from datetime import datetime
 
 # Add script directory to path
 SCRIPT_DIR = Path(__file__).parent
@@ -27,15 +26,13 @@ env_path = SCRIPT_DIR.parent / ".env"
 if env_path.exists():
     load_dotenv(env_path)
 
-from config import INCIDENTS_FILE, CHANGES_FILE, REQUESTS_FILE, PROBLEMS_FILE, OUTPUT_DIR
+from config import INCIDENTS_FILE, CHANGES_FILE, REQUESTS_FILE, PROBLEMS_FILE
 from analyzer import ComprehensiveAnalyzer
-from visualizer import ComprehensiveVisualizer
-from report_builder import ComprehensiveReportBuilder
 from insight_generator import InsightGenerator
-from pptx_builder import PPTXBuilder
+from xlsx_builder import XlsxBuilder
 
 
-def print_banner(languages: list) -> None:
+def print_banner(languages: list, chart_engine: str = "native") -> None:
     """Print startup banner."""
     print("\n" + "=" * 70)
     print("  📊 Customer Quality Report Generator (Comprehensive)")
@@ -43,6 +40,7 @@ def print_banner(languages: list) -> None:
     print("=" * 70)
     lang_str = " & ".join([("Chinese" if l == "zh" else "English") for l in languages])
     print(f"  🌐 Languages: {lang_str}")
+    print(f"  📊 Chart Engine: {chart_engine}")
 
 
 def check_data_files() -> dict:
@@ -61,66 +59,27 @@ def check_data_files() -> dict:
     return status
 
 
-def generate_reports_for_language(
-    result,
-    charts: dict,
-    insights: dict,
-    language: str,
-    all_output_paths: dict,
-    output_format: str = "all",
-    analyzer=None
-) -> None:
-    """Generate reports for a specific language."""
-    lang_label = "ZH" if language == "zh" else "EN"
-    lang_name = "Chinese" if language == "zh" else "English"
-
-    print(f"\n  [{lang_label}] Building {lang_name} reports...")
-
-    # HTML and DOCX
-    if output_format in ("all", "html", "docx"):
-        builder = ComprehensiveReportBuilder(result, charts, insights, language)
-        output_paths = builder.save()
-
-        for fmt, path in output_paths.items():
-            key = f"{fmt}_{lang_label}"
-            all_output_paths[key] = path
-            print(f"    ✓ {fmt.upper()}: {Path(path).name}")
-
-    # PPTX
-    if output_format in ("all", "pptx"):
-        try:
-            pptx_builder = PPTXBuilder(result, charts, insights, language)
-            pptx_path = pptx_builder.save()
-            all_output_paths[f"pptx_{lang_label}"] = pptx_path
-            print(f"    ✓ PPTX: {Path(pptx_path).name}")
-        except Exception as e:
-            print(f"    ⚠ PPTX generation skipped: {e}")
-
-    # XLSX
-    if output_format in ("all", "xlsx") and analyzer is not None:
-        try:
-            from xlsx_builder import XlsxBuilder
-            xlsx_builder = XlsxBuilder(
-                result=result,
-                incidents_df=analyzer.incidents_df,
-                changes_df=analyzer.changes_df,
-                requests_df=analyzer.requests_df,
-                problems_df=analyzer.problems_df,
-                sla_map=analyzer.sla_map,
-                insights=insights,
-                language=language,
-            )
-            xlsx_path = xlsx_builder.save()
-            all_output_paths[f"xlsx_{lang_label}"] = xlsx_path
-            print(f"    ✓ XLSX: {Path(xlsx_path).name}")
-        except Exception as e:
-            print(f"    ⚠ XLSX generation skipped: {e}")
+def generate_xlsx(analyzer, result, insights: dict, language: str,
+                  chart_engine: str = "native") -> Path:
+    """Generate XLSX report for a given language. Returns output path."""
+    xlsx_builder = XlsxBuilder(
+        result=result,
+        incidents_df=analyzer.incidents_df,
+        changes_df=analyzer.changes_df,
+        requests_df=analyzer.requests_df,
+        problems_df=analyzer.problems_df,
+        sla_map=analyzer.sla_map,
+        insights=insights,
+        language=language,
+        chart_engine=chart_engine,
+    )
+    return xlsx_builder.save()
 
 
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Generate Comprehensive Customer Quality Report"
+        description="Generate Comprehensive Customer Quality Report (XLSX)"
     )
     parser.add_argument(
         "--language", "-l",
@@ -129,15 +88,15 @@ def main():
         help="Output language (en=English, zh=Chinese, both=Both)"
     )
     parser.add_argument(
-        "--format", "-f",
-        choices=["all", "docx", "pptx", "html", "xlsx"],
-        default="all",
-        help="Output format (default: all)"
-    )
-    parser.add_argument(
         "--no-ai",
         action="store_true",
         help="Skip AI insight generation"
+    )
+    parser.add_argument(
+        "--chart-engine",
+        choices=["native", "matplotlib"],
+        default="native",
+        help="Chart engine: native (Excel built-in) or matplotlib (PNG images)"
     )
 
     args = parser.parse_args()
@@ -148,7 +107,7 @@ def main():
     else:
         languages = [args.language]
 
-    print_banner(languages)
+    print_banner(languages, args.chart_engine)
 
     # Check data files
     print("\n  📁 Data Files:")
@@ -190,34 +149,33 @@ def main():
         print(f"       • Problems: {result.total_problems}")
         print()
 
-        # Step 2: Generate charts (language-independent)
-        print("  ▶ Generating visualizations...")
-        visualizer = ComprehensiveVisualizer(result)
-        charts = visualizer.generate_all_charts()
-        print(f"    ✓ Generated {len(charts)} charts")
-
-        # Step 3: Generate reports for each language
+        # Step 2: Generate reports for each language
         all_output_paths = {}
 
         for language in languages:
+            lang_label = "ZH" if language == "zh" else "EN"
+
             # AI Insights (language-dependent)
             insights = {}
             if not args.no_ai:
-                lang_label = "ZH" if language == "zh" else "EN"
                 print(f"\n  [{lang_label}] Generating AI insights...")
                 try:
                     insight_gen = InsightGenerator(language)
                     insights = insight_gen.generate_all_insights(result)
                     print(f"    ✓ Generated {len(insights)} insights")
+                    insight_gen.print_cache_stats()
                 except Exception as e:
                     print(f"    ⚠ AI insights skipped: {e}")
             else:
                 if language == languages[0]:
                     print("\n  ▶ Skipping AI insights (--no-ai)")
 
-            # Generate reports
-            generate_reports_for_language(result, charts, insights, language, all_output_paths,
-                                          output_format=args.format, analyzer=analyzer)
+            # Generate XLSX
+            print(f"\n  [{lang_label}] Building XLSX report...")
+            xlsx_path = generate_xlsx(analyzer, result, insights, language,
+                                      args.chart_engine)
+            all_output_paths[f"xlsx_{lang_label}"] = xlsx_path
+            print(f"    ✓ XLSX: {Path(xlsx_path).name}")
 
         # Summary
         print()

@@ -339,16 +339,27 @@ class ComprehensiveAnalyzer:
         self.incidents_df, self.sla_df = load_excel_data(self.incidents_file)
         self.incidents_df = clean_data(self.incidents_df, EXCLUDED_RESOLVERS)
 
-        # Build SLA map
+        # Build SLA map — store as dict with both response and resolution
         self.sla_map = DEFAULT_SLA.copy()
         for _, row in self.sla_df.iterrows():
             resolution_col = None
+            response_col = None
             for col_name in ["Resolution （hours）", "Resolution (hours)"]:
                 if col_name in row.index:
                     resolution_col = col_name
                     break
-            if resolution_col:
-                self.sla_map[row["Priority"]] = row[resolution_col]
+            for col_name in ["Response （minutes）", "Response (minutes)"]:
+                if col_name in row.index:
+                    response_col = col_name
+                    break
+            priority = row["Priority"]
+            if resolution_col or response_col:
+                res_hours = row[resolution_col] if resolution_col else 24
+                resp_min = row[response_col] if response_col else None
+                self.sla_map[priority] = {
+                    "resolution_hours": float(res_hours),
+                    "response_minutes": float(resp_min) if resp_min is not None else None,
+                }
 
         # Changes (optional)
         if self.changes_file.exists():
@@ -514,8 +525,11 @@ class ComprehensiveAnalyzer:
                 continue
 
             total += 1
-            sla_hours = self.sla_map.get(priority, 24)
-            sla_minutes = sla_hours * 60
+            sla_val = self.sla_map.get(priority, 24)
+            if isinstance(sla_val, dict):
+                sla_minutes = sla_val.get("resolution_hours", 24) * 60
+            else:
+                sla_minutes = float(sla_val) * 60
 
             if resolution_time <= sla_minutes:
                 compliant += 1
@@ -994,7 +1008,7 @@ class ComprehensiveAnalyzer:
         # Select key KPIs for main dashboard
         key_incident_kpis = ["sla_rate", "avg_mttr", "p1_p2_count", "backlog"]
         key_change_kpis = ["change_success_rate", "change_incident_rate"]
-        key_request_kpis = ["request_sla_rate", "request_csat"]
+        key_request_kpis = ["request_sla_rate", "request_csat", "fulfillment_rate"]
         key_problem_kpis = ["problem_closure_rate", "rca_rate"]
 
         for key in key_incident_kpis:
@@ -1261,20 +1275,26 @@ class ComprehensiveAnalyzer:
                 continue
 
             compliant = 0
-            sla_hours = self.sla_map.get(priority, 24)
-            sla_minutes = sla_hours * 60
+            sla_val = self.sla_map.get(priority, 24)
+            if isinstance(sla_val, dict):
+                sla_minutes = sla_val.get("resolution_hours", 24) * 60
+            else:
+                sla_minutes = float(sla_val) * 60
 
             for _, row in priority_df.iterrows():
                 resolution_time = row.get("Resolution Time(m)", 0)
                 if pd.notna(resolution_time) and resolution_time <= sla_minutes:
                     compliant += 1
 
+            target_val = self.sla_map.get(priority, 24)
+            if isinstance(target_val, dict):
+                target_val = target_val.get("resolution_hours", 24)
             breakdown.append(SLABreakdown(
                 priority=priority,
                 total=total,
                 compliant=compliant,
                 rate=safe_divide(compliant, total),
-                target=self.sla_map.get(priority, 24)
+                target=target_val
             ))
 
         return breakdown

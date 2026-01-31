@@ -26,61 +26,99 @@ from analyzer import ComprehensiveResult
 
 CACHE_FILE = SCRIPT_DIR / ".insights_cache.json"
 CACHE_EXPIRY_DAYS = 30
+MAX_CACHE_ENTRIES = 200
 
 
 class InsightGenerator:
-    """AI-powered insight generator with caching."""
-    
+    """AI-powered insight generator with LRU caching."""
+
     def __init__(self, language: str = "en"):
         self.language = language
         self.client = None
         self.cache = self._load_cache()
-        
+        self._cache_hits = 0
+        self._cache_misses = 0
+
         api_key = OPENAI_API_KEY or os.getenv("OPENAI_API_KEY")
         if api_key:
             self.client = OpenAI(
                 api_key=api_key,
                 base_url=OPENAI_BASE_URL or os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
             )
-    
+
     def _load_cache(self) -> Dict:
         if CACHE_FILE.exists():
             try:
                 with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except:
+                    cache = json.load(f)
+                # Purge expired entries on load
+                now = datetime.now()
+                valid = {}
+                for k, v in cache.items():
+                    try:
+                        ts = datetime.fromisoformat(v.get("last_used", v.get("timestamp", "")))
+                        if (now - ts).days < CACHE_EXPIRY_DAYS:
+                            valid[k] = v
+                    except (ValueError, TypeError):
+                        pass
+                if len(valid) < len(cache):
+                    self._write_cache(valid)
+                return valid
+            except (json.JSONDecodeError, IOError):
                 return {}
         return {}
-    
-    def _save_cache(self) -> None:
+
+    def _write_cache(self, data: Dict) -> None:
+        """Write cache dict to disk with LRU eviction."""
+        if len(data) > MAX_CACHE_ENTRIES:
+            sorted_items = sorted(
+                data.items(),
+                key=lambda x: x[1].get("last_used", x[1].get("timestamp", "")),
+                reverse=True,
+            )
+            data = dict(sorted_items[:MAX_CACHE_ENTRIES])
         try:
             with open(CACHE_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.cache, f, ensure_ascii=False, indent=2)
-        except:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except IOError:
             pass
-    
+
+    def _save_cache(self) -> None:
+        self._write_cache(self.cache)
+
     def _get_cache_key(self, context: str) -> str:
         content = f"{context}_{self.language}"
         return hashlib.md5(content.encode()).hexdigest()
-    
+
     def _get_cached(self, key: str) -> Optional[str]:
         entry = self.cache.get(key)
         if entry:
             try:
-                cached_time = datetime.fromisoformat(entry.get("timestamp", ""))
+                cached_time = datetime.fromisoformat(entry.get("last_used", entry.get("timestamp", "")))
                 if (datetime.now() - cached_time).days < CACHE_EXPIRY_DAYS:
+                    # Update last_used on hit
+                    entry["last_used"] = datetime.now().isoformat()
+                    self._cache_hits += 1
                     return entry.get("insight")
-            except:
+            except (ValueError, TypeError):
                 pass
+        self._cache_misses += 1
         return None
-    
+
     def _cache_insight(self, key: str, insight: str) -> None:
+        now = datetime.now().isoformat()
         self.cache[key] = {
             "insight": insight,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now,
+            "last_used": now,
             "language": self.language
         }
         self._save_cache()
+
+    def print_cache_stats(self) -> None:
+        total = self._cache_hits + self._cache_misses
+        if total:
+            print(f"    📦 Cache: {self._cache_hits}/{total} hits, {self._cache_misses} API calls")
     
     def _call_ai(self, prompt: str) -> str:
         if not self.client:
@@ -93,7 +131,7 @@ class InsightGenerator:
                     {"role": "system", "content": self._system_prompt()},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=500,
+                max_tokens=2000,
                 temperature=0.7
             )
             return response.choices[0].message.content.strip()
@@ -103,10 +141,31 @@ class InsightGenerator:
     
     def _system_prompt(self) -> str:
         if self.language == "zh":
-            return """你是一位资深IT运维管理顾问。请基于数据提供简洁、专业的分析洞察。
-要求：2-3句话，聚焦关键发现和建议，适合管理层阅读。"""
-        return """You are a senior IT operations consultant. Provide concise, professional insights.
-Requirements: 2-3 sentences, focus on key findings and recommendations, executive-level language."""
+            return """你是一位资深IT运维管理顾问，正在为企业高管撰写服务质量报告的洞察分析。
+
+请基于数据提供结构化、深度的分析洞察，要求：
+- 使用以下格式输出（每段用换行分隔）：
+  📌 发现：[用数据说话，指出2-3个关键发现，展开分析，每个发现要有数据佐证和趋势解读]
+  🔍 原因：[深入的数据驱动根因分析，从多个维度（人、流程、技术、管理）剖析，引用具体数据]
+  💡 建议：[1-2条简明的改进措施]
+  📈 预期：[一句话的量化预期]
+- 发现和原因是重点，要详细展开，用数据说话
+- 建议和预期要简短，每条不超过一句话
+- 所有数据引用要准确，百分比保留一位小数
+- 语气专业严谨，适合管理层阅读
+- 分析要结合当前 tab 页面中的图表和数据表格所呈现的信息"""
+        return """You are a senior IT operations management consultant writing insights for an executive quality report.
+
+Provide structured, data-driven analysis using this format (separate each with line breaks):
+📌 Finding: [State 2-3 key findings with specific data points. Elaborate on each finding with supporting metrics, trends, and patterns from the data. This is the core of the insight.]
+🔍 Root Cause: [Deep, multi-dimensional root cause analysis from people, process, technology, and management perspectives. Reference specific data points.]
+💡 Recommendations: [1-2 concise, actionable measures — one sentence each]
+📈 Expected Impact: [One sentence with quantified improvement target]
+- Findings and Root Cause are the priority — be detailed and data-specific
+- Recommendations and Expected Impact should be brief
+- All data references must be accurate, percentages to 1 decimal
+- Professional tone suitable for executive audience
+- Analysis should reference the charts and data tables in the current sheet"""
     
     def _fallback(self) -> str:
         if self.language == "zh":
@@ -356,18 +415,29 @@ Month-over-Month Comparison: {'Available' if result.can_compare_mom else 'Not av
         sla = kpis.get("sla_rate")
         mttr = kpis.get("avg_mttr")
         p1_p2 = kpis.get("p1_p2_count")
+
+        # Gather more contextual data
+        major_count = len(result.major_incidents) if result.major_incidents else 0
+        top_risks = "; ".join([r.message[:40] for r in result.top_risks[:3]]) if result.top_risks else "N/A"
+
         context = f"""
 Total Incidents: {result.total_incidents}
-SLA Rate: {f'{sla.current_value:.1%}' if sla else 'N/A'}
-Avg MTTR: {f'{mttr.current_value:.1f}h' if mttr else 'N/A'}
-P1/P2 Count: {int(p1_p2.current_value) if p1_p2 else 'N/A'}
-Major Incidents: {len(result.major_incidents) if result.major_incidents else 0}
+SLA Compliance Rate: {f'{sla.current_value:.1%}' if sla else 'N/A'}
+Average MTTR: {f'{mttr.current_value:.1f} hours' if mttr else 'N/A'}
+P1/P2 High-Priority Count: {int(p1_p2.current_value) if p1_p2 else 'N/A'}
+Major Incidents: {major_count}
+Data Span: {result.data_span_days} days
+Health Score: {result.health_score:.0f}/100
+Top Risks: {top_risks}
+
+Charts on this sheet: Monthly Incident Trend (bar + completion rate line), Priority Distribution Pie, Top 10 Categories Bar.
 """
         key = self._get_cache_key(f"incident_detail_{context}")
         cached = self._get_cached(key)
         if cached:
             return cached
-        prompt = f"""基于以下事件详细数据，按照格式输出分析：
+        if self.language == "zh":
+            prompt = f"""基于以下事件详细数据，按照格式输出分析：
 📌 发现：[关键发现]
 🔍 原因：[数据驱动的原因分析]
 💡 建议：[具体改进措施]
@@ -375,32 +445,67 @@ Major Incidents: {len(result.major_incidents) if result.major_incidents else 0}
 
 数据：
 {context}"""
+        else:
+            prompt = f"""Based on the following incident data, provide structured analysis:
+📌 Finding: [Key data-driven findings with specific numbers]
+🔍 Root Cause: [Data-driven root cause analysis]
+💡 Recommendations: [2-3 specific, actionable improvement measures]
+📈 Expected Impact: [Quantified expected improvement]
+
+Data:
+{context}"""
         insight = self._call_ai(prompt)
         self._cache_insight(key, insight)
         return insight
 
     def generate_sla_detail_insight(self, result: ComprehensiveResult) -> str:
-        """Sheet 3: SLA detail — SLA rates, violations."""
+        """Sheet 3: SLA detail — SLA rates, violations, monthly trends."""
         sla_info = ""
         if result.sla_breakdown:
-            for sb in result.sla_breakdown[:5]:
-                sla_info += f"- {sb.process}: {sb.achieved_rate:.1%} (target {sb.target_rate:.1%})\n"
+            for sb in result.sla_breakdown:
+                sla_info += f"- {sb.priority}: compliance={sb.rate:.1%}, total={sb.total}, compliant={sb.compliant}, target={sb.target}h\n"
+        # Overall SLA
+        overall_sla = ""
+        if result.incident_summary and result.incident_summary.kpis:
+            sla_kpi = result.incident_summary.kpis.get("sla_rate")
+            if sla_kpi:
+                overall_sla = f"Overall SLA Rate: {sla_kpi.current_value:.1%}"
+        # Violation count
+        violation_count = 0
+        if result.sla_breakdown:
+            violation_count = sum(s.total - s.compliant for s in result.sla_breakdown)
         context = f"""
+{overall_sla}
+Total Incidents: {result.total_incidents}
+SLA Violations: {violation_count}
 Health Score: {result.health_score:.0f}/100
-SLA Breakdown:
+
+SLA Breakdown by Priority:
 {sla_info if sla_info else 'N/A'}
+
+Charts on this sheet: Resolution SLA Gauge, Response SLA Gauge, Monthly SLA Trend (compliance vs 95% target), SLA Violations by Priority (stacked bar), SLA Violation Heatmap (category × month).
 """
         key = self._get_cache_key(f"sla_detail_{context}")
         cached = self._get_cached(key)
         if cached:
             return cached
-        prompt = f"""基于以下SLA详细数据，按照格式输出分析：
+        if self.language == "zh":
+            prompt = f"""基于以下SLA详细数据，按照格式输出分析：
 📌 发现：[关键发现]
 🔍 原因：[数据驱动的原因分析]
 💡 建议：[具体改进措施]
 📈 预期：[量化的预期改进效果]
 
 数据：
+{context}"""
+        else:
+            prompt = f"""Based on the following SLA performance data, provide structured analysis:
+📌 Finding: [Key SLA compliance findings with specific rates and gaps]
+🔍 Root Cause: [Data-driven analysis of SLA breaches and patterns]
+💡 Recommendations: [2-3 specific measures to improve SLA compliance]
+📈 Expected Impact: [Quantified expected SLA improvement]
+
+Data:
 {context}"""
         insight = self._call_ai(prompt)
         self._cache_insight(key, insight)
@@ -422,13 +527,23 @@ Failed Changes: {len(result.failed_changes) if result.failed_changes else 0}
         cached = self._get_cached(key)
         if cached:
             return cached
-        prompt = f"""基于以下变更详细数据，按照格式输出分析：
+        if self.language == "zh":
+            prompt = f"""基于以下变更详细数据，按照格式输出分析：
 📌 发现：[关键发现]
 🔍 原因：[数据驱动的原因分析]
 💡 建议：[具体改进措施]
 📈 预期：[量化的预期改进效果]
 
 数据：
+{context}"""
+        else:
+            prompt = f"""Based on the following change management data, provide structured analysis:
+📌 Finding: [Key findings on change success rate and failure patterns]
+🔍 Root Cause: [Data-driven analysis of change failures and incidents caused]
+💡 Recommendations: [2-3 specific measures to improve change success]
+📈 Expected Impact: [Quantified expected improvement in change outcomes]
+
+Data:
 {context}"""
         insight = self._call_ai(prompt)
         self._cache_insight(key, insight)
@@ -449,13 +564,23 @@ Request SLA Rate: {f'{sla.current_value:.1%}' if sla else 'N/A'}
         cached = self._get_cached(key)
         if cached:
             return cached
-        prompt = f"""基于以下服务请求详细数据，按照格式输出分析：
+        if self.language == "zh":
+            prompt = f"""基于以下服务请求详细数据，按照格式输出分析：
 📌 发现：[关键发现]
 🔍 原因：[数据驱动的原因分析]
 💡 建议：[具体改进措施]
 📈 预期：[量化的预期改进效果]
 
 数据：
+{context}"""
+        else:
+            prompt = f"""Based on the following service request data, provide structured analysis:
+📌 Finding: [Key findings on request fulfillment and customer satisfaction]
+🔍 Root Cause: [Data-driven analysis of CSAT scores and SLA gaps]
+💡 Recommendations: [2-3 specific measures to improve request handling]
+📈 Expected Impact: [Quantified expected improvement in satisfaction and SLA]
+
+Data:
 {context}"""
         insight = self._call_ai(prompt)
         self._cache_insight(key, insight)
@@ -477,13 +602,23 @@ Open Problems: {len(result.open_problems) if result.open_problems else 0}
         cached = self._get_cached(key)
         if cached:
             return cached
-        prompt = f"""基于以下问题管理详细数据，按照格式输出分析：
+        if self.language == "zh":
+            prompt = f"""基于以下问题管理详细数据，按照格式输出分析：
 📌 发现：[关键发现]
 🔍 原因：[数据驱动的原因分析]
 💡 建议：[具体改进措施]
 📈 预期：[量化的预期改进效果]
 
 数据：
+{context}"""
+        else:
+            prompt = f"""Based on the following problem management data, provide structured analysis:
+📌 Finding: [Key findings on problem closure rate and RCA completion]
+🔍 Root Cause: [Data-driven analysis of open problems and resolution gaps]
+💡 Recommendations: [2-3 specific measures to improve problem management]
+📈 Expected Impact: [Quantified expected improvement in closure and RCA rates]
+
+Data:
 {context}"""
         insight = self._call_ai(prompt)
         self._cache_insight(key, insight)
@@ -503,13 +638,23 @@ Top Risks: {len(result.top_risks) if result.top_risks else 0}
         cached = self._get_cached(key)
         if cached:
             return cached
-        prompt = f"""基于以下跨流程数据，分析事件、变更、请求、问题之间的关联性，按照格式输出分析：
+        if self.language == "zh":
+            prompt = f"""基于以下跨流程数据，分析事件、变更、请求、问题之间的关联性，按照格式输出分析：
 📌 发现：[关键发现]
 🔍 原因：[数据驱动的原因分析]
 💡 建议：[具体改进措施]
 📈 预期：[量化的预期改进效果]
 
 数据：
+{context}"""
+        else:
+            prompt = f"""Based on the following cross-process data, analyze correlations between incidents, changes, requests, and problems:
+📌 Finding: [Key cross-process correlations and patterns with specific numbers]
+🔍 Root Cause: [Data-driven analysis of inter-process dependencies]
+💡 Recommendations: [2-3 specific measures to improve cross-process coordination]
+📈 Expected Impact: [Quantified expected improvement from better integration]
+
+Data:
 {context}"""
         insight = self._call_ai(prompt)
         self._cache_insight(key, insight)
@@ -528,13 +673,23 @@ Health Grade: {result.health_grade}
         cached = self._get_cached(key)
         if cached:
             return cached
-        prompt = f"""基于以下工作量数据，分析人员负荷和技能需求，按照格式输出分析：
+        if self.language == "zh":
+            prompt = f"""基于以下工作量数据，分析人员负荷和技能需求，按照格式输出分析：
 📌 发现：[关键发现]
 🔍 原因：[数据驱动的原因分析]
 💡 建议：[具体改进措施]
 📈 预期：[量化的预期改进效果]
 
 数据：
+{context}"""
+        else:
+            prompt = f"""Based on the following workload data, analyze personnel capacity and skill requirements:
+📌 Finding: [Key findings on workload distribution and capacity gaps]
+🔍 Root Cause: [Data-driven analysis of staffing and skill coverage issues]
+💡 Recommendations: [2-3 specific measures for workload optimization and training]
+📈 Expected Impact: [Quantified expected improvement in team efficiency]
+
+Data:
 {context}"""
         insight = self._call_ai(prompt)
         self._cache_insight(key, insight)
@@ -556,13 +711,23 @@ MoM Comparison: {'Available' if result.can_compare_mom else 'N/A'}
         cached = self._get_cached(key)
         if cached:
             return cached
-        prompt = f"""基于以下时间维度数据，分析时间规律和趋势，按照格式输出分析：
+        if self.language == "zh":
+            prompt = f"""基于以下时间维度数据，分析时间规律和趋势，按照格式输出分析：
 📌 发现：[关键发现]
 🔍 原因：[数据驱动的原因分析]
 💡 建议：[具体改进措施]
 📈 预期：[量化的预期改进效果]
 
 数据：
+{context}"""
+        else:
+            prompt = f"""Based on the following time dimension data, analyze temporal patterns and trends:
+📌 Finding: [Key findings on time-based patterns with specific MTTR and trend data]
+🔍 Root Cause: [Data-driven analysis of time-related performance variations]
+💡 Recommendations: [2-3 specific measures for time-based optimization]
+📈 Expected Impact: [Quantified expected improvement in response times and patterns]
+
+Data:
 {context}"""
         insight = self._call_ai(prompt)
         self._cache_insight(key, insight)
@@ -589,13 +754,23 @@ Risks:
         cached = self._get_cached(key)
         if cached:
             return cached
-        prompt = f"""基于以下行动计划和风险数据，总结优先行动方案，按照格式输出分析：
+        if self.language == "zh":
+            prompt = f"""基于以下行动计划和风险数据，总结优先行动方案，按照格式输出分析：
 📌 发现：[关键发现]
 🔍 原因：[数据驱动的原因分析]
 💡 建议：[具体改进措施]
 📈 预期：[量化的预期改进效果]
 
 数据：
+{context}"""
+        else:
+            prompt = f"""Based on the following action plan and risk data, summarize priority actions:
+📌 Finding: [Key findings on most critical actions and risks requiring attention]
+🔍 Root Cause: [Data-driven analysis of underlying issues driving these actions]
+💡 Recommendations: [2-3 highest-priority actions with specific implementation steps]
+📈 Expected Impact: [Quantified expected improvement from executing the action plan]
+
+Data:
 {context}"""
         insight = self._call_ai(prompt)
         self._cache_insight(key, insight)
@@ -608,28 +783,34 @@ Risks:
     def generate_all_insights(self, result: ComprehensiveResult) -> Dict[str, str]:
         """Generate all insights for comprehensive report."""
         print(f"    Generating insights...")
-        
-        insights = {
-            "executive_summary": self.generate_executive_summary(result),
-            "incident_insight": self.generate_incident_insight(result),
-            "change_insight": self.generate_change_insight(result),
-            "request_insight": self.generate_request_insight(result),
-            "problem_insight": self.generate_problem_insight(result),
-            "risk_insight": self.generate_risk_insight(result),
-            "action_insight": self.generate_action_insight(result),
-            "trend_insight": self.generate_trend_insight(result),
-            "incident_detail": self.generate_incident_detail_insight(result),
-            "sla_detail": self.generate_sla_detail_insight(result),
-            "change_detail": self.generate_change_detail_insight(result),
-            "request_detail": self.generate_request_detail_insight(result),
-            "problem_detail": self.generate_problem_detail_insight(result),
-            "cross_process": self.generate_cross_process_insight(result),
-            "personnel": self.generate_personnel_insight(result),
-            "time_analysis": self.generate_time_analysis_insight(result),
-            "action_plan": self.generate_action_plan_insight(result),
+
+        generators = {
+            "executive_summary": self.generate_executive_summary,
+            "incident_insight": self.generate_incident_insight,
+            "change_insight": self.generate_change_insight,
+            "request_insight": self.generate_request_insight,
+            "problem_insight": self.generate_problem_insight,
+            "risk_insight": self.generate_risk_insight,
+            "action_insight": self.generate_action_insight,
+            "trend_insight": self.generate_trend_insight,
+            "incident_detail": self.generate_incident_detail_insight,
+            "sla_detail": self.generate_sla_detail_insight,
+            "change_detail": self.generate_change_detail_insight,
+            "request_detail": self.generate_request_detail_insight,
+            "problem_detail": self.generate_problem_detail_insight,
+            "cross_process": self.generate_cross_process_insight,
+            "personnel": self.generate_personnel_insight,
+            "time_analysis": self.generate_time_analysis_insight,
+            "action_plan": self.generate_action_plan_insight,
         }
-        
-        # Filter out empty insights
-        insights = {k: v for k, v in insights.items() if v}
-        
+
+        insights = {}
+        for key, gen_fn in generators.items():
+            try:
+                val = gen_fn(result)
+                if val:
+                    insights[key] = val
+            except Exception as e:
+                print(f"    ⚠ Insight '{key}' failed: {e}")
+
         return insights
