@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# IDE / Editor
+.claude/
+.VSCodeCounter/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+
+# Output
+customer-cross-overview/output/
