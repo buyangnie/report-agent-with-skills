@@ -950,6 +950,93 @@ class MatplotlibChartEngine:
                                     self._t("Person", "人员"),
                                     multicolor=True)
 
+    def chart_pers_top10_stacked_bar(self, personnel_priority) -> Optional[io.BytesIO]:
+        """Horizontal stacked bar of top 10 personnel by count with priority breakdown.
+
+        Each bar segment represents a different priority level:
+        - P1 (Critical) - Red
+        - P2 (High) - Orange
+        - P3 (Medium) - Yellow
+        - P4 (Low) - Green
+        """
+        if not personnel_priority:
+            return None
+
+        # Take top 10 by total count (already sorted)
+        top10 = personnel_priority[:10]
+
+        # Prepare data: names and priority counts
+        names = [getattr(p, "name", f"P{i}") for i, p in enumerate(top10)]
+        p1_counts = [getattr(p, "p1_count", 0) for p in top10]
+        p2_counts = [getattr(p, "p2_count", 0) for p in top10]
+        p3_counts = [getattr(p, "p3_count", 0) for p in top10]
+        p4_counts = [getattr(p, "p4_count", 0) for p in top10]
+        totals = [getattr(p, "total", 0) for p in top10]
+
+        if sum(totals) == 0:
+            return None
+
+        fig, ax = self._new_fig()
+        y = np.arange(len(names))
+        bar_height = 0.55
+
+        # Priority colors matching the native engine
+        priority_colors = {
+            "P1": "#ef4444",  # Red - Critical
+            "P2": "#f97316",  # Orange - High
+            "P3": "#eab308",  # Yellow - Medium
+            "P4": "#22c55e",  # Green - Low
+        }
+
+        # Create stacked horizontal bars
+        left = np.zeros(len(names))
+
+        # P1 bars
+        ax.barh(y, p1_counts, height=bar_height, left=left,
+                color=priority_colors["P1"], edgecolor="white", linewidth=0.8,
+                label="P1")
+        left = np.array(p1_counts)
+
+        # P2 bars
+        ax.barh(y, p2_counts, height=bar_height, left=left,
+                color=priority_colors["P2"], edgecolor="white", linewidth=0.8,
+                label="P2")
+        left = left + np.array(p2_counts)
+
+        # P3 bars
+        ax.barh(y, p3_counts, height=bar_height, left=left,
+                color=priority_colors["P3"], edgecolor="white", linewidth=0.8,
+                label="P3")
+        left = left + np.array(p3_counts)
+
+        # P4 bars
+        ax.barh(y, p4_counts, height=bar_height, left=left,
+                color=priority_colors["P4"], edgecolor="white", linewidth=0.8,
+                label="P4")
+
+        ax.set_yticks(y)
+        ax.set_yticklabels(names, fontsize=7.5, fontfamily=self._fonts["body"])
+        ax.invert_yaxis()
+
+        # Add total labels at the end of each bar
+        max_val = max(totals) if totals else 1
+        for i, total in enumerate(totals):
+            ax.text(total + max_val * 0.02, i,
+                    f"{total}", va="center", ha="left",
+                    fontsize=7, fontweight="600",
+                    color=_hex(TEXT_PRIMARY),
+                    fontfamily=self._fonts["number"])
+
+        self._style_ax(ax, self._t("Top 10 Personnel by Priority",
+                                   "人员Top10 (按优先级分布)"),
+                       self._t("Ticket Count", "工单数量"),
+                       self._t("Person", "人员"))
+        ax.set_xlim(0, max_val * 1.15)
+        ax.xaxis.grid(True, color="#f1f5f9", linewidth=0.5)
+        ax.legend(loc="lower right", framealpha=0.95, borderpad=0.8, ncol=4)
+        fig.tight_layout()
+        return self._to_png(fig)
+
     def chart_pers_performance_matrix(self, personnel) -> Optional[io.BytesIO]:
         """Scatter plot: Volume (x) vs Avg MTTR (y) with quadrant labels."""
         if not personnel:

@@ -669,6 +669,7 @@ HTML_TEMPLATE = """
                             <th>{{ texts.tier_complexity_index }}</th>
                             <th>{{ texts.tier_priority_index }}</th>
                             <th>{{ texts.profile_total_tickets }}</th>
+                            <th>{{ texts.weighted_workload if texts.weighted_workload else 'Weighted' }}</th>
                             <th>{{ texts.tier_justification }}</th>
                         </tr>
                     </thead>
@@ -680,6 +681,7 @@ HTML_TEMPLATE = """
                             <td>{{ "%.2f"|format(profile.complexity_index) }}x</td>
                             <td>{{ "%.1f"|format(profile.priority_index * 100) }}%</td>
                             <td>{{ profile.total_tickets }}</td>
+                            <td>{{ "%.0f"|format(profile.weighted_workload) }}</td>
                             <td>{{ profile.tier_justification }}</td>
                         </tr>
                         {% endfor %}
@@ -805,8 +807,14 @@ HTML_TEMPLATE = """
             <div class="kpi-grid">
                 <div class="kpi-card {% if workload_balance.gini_coefficient > 0.5 %}danger{% elif workload_balance.gini_coefficient > 0.3 %}warning{% else %}success{% endif %}">
                     <div class="kpi-value">{{ "%.3f"|format(workload_balance.gini_coefficient) }}</div>
-                    <div class="kpi-label">{{ texts.balance_gini }}</div>
+                    <div class="kpi-label">{{ texts.balance_gini }} ({{ texts.raw_workload if texts.raw_workload else 'Raw' }})</div>
                 </div>
+                {% if workload_balance.weighted_gini_coefficient > 0 %}
+                <div class="kpi-card {% if workload_balance.weighted_gini_coefficient > 0.5 %}danger{% elif workload_balance.weighted_gini_coefficient > 0.3 %}warning{% else %}success{% endif %}">
+                    <div class="kpi-value">{{ "%.3f"|format(workload_balance.weighted_gini_coefficient) }}</div>
+                    <div class="kpi-label">{{ texts.weighted_gini if texts.weighted_gini else 'Weighted Gini' }}</div>
+                </div>
+                {% endif %}
                 <div class="kpi-card">
                     <div class="kpi-value">{{ "%.1f"|format(workload_balance.avg_workload) }}</div>
                     <div class="kpi-label">{{ texts.balance_avg_workload }}</div>
@@ -818,6 +826,9 @@ HTML_TEMPLATE = """
             </div>
 
             <p><strong>{{ texts.balance_interpretation }}:</strong> {{ workload_balance.interpretation }}</p>
+            {% if workload_balance.weighted_interpretation %}
+            <p><strong>{{ texts.weighted_balance if texts.weighted_balance else 'Priority-Weighted Balance' }}:</strong> {{ workload_balance.weighted_interpretation }}</p>
+            {% endif %}
 
             {% if workload_balance.overloaded_resolvers %}
             <p><strong>{{ texts.balance_overloaded }}:</strong> {{ workload_balance.overloaded_resolvers | join(', ') }}</p>
@@ -830,6 +841,20 @@ HTML_TEMPLATE = """
                 <div class="insight-content">{{ insights.workload_balance | safe }}</div>
             </div>
             {% endif %}
+        </section>
+
+        <!-- Priority Distribution -->
+        <section id="priority-distribution">
+            <h2><span class="section-icon">🎯</span> {{ texts.priority_distribution if texts.priority_distribution else 'Priority Distribution' }}</h2>
+            
+            {% if charts.priority_heatmap %}
+            <div class="chart-container">
+                <h3>{{ texts.chart_priority_heatmap if texts.chart_priority_heatmap else 'Priority Distribution Heatmap' }}</h3>
+                <img src="data:image/png;base64,{{ charts.priority_heatmap }}" alt="Priority Distribution Heatmap">
+            </div>
+            {% endif %}
+            
+            <p>{{ texts.priority_distribution_desc if texts.priority_distribution_desc else 'This heatmap shows how tickets of different priorities are distributed among resolvers. Higher P1/P2 counts indicate specialists handling more critical work.' }}</p>
         </section>
 
         <!-- Knowledge Silos -->

@@ -16,5 +16,3 @@ build/
 # Environment
 .env
 
-# Output
-customer-cross-overview/output/

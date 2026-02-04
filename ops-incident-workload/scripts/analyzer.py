@@ -35,7 +35,8 @@ from config import (
     OVERLOAD_MULTIPLIER,
     LONG_TAIL_HOURS,
     DEFAULT_SLA,
-    EXCLUDED_RESOLVERS
+    EXCLUDED_RESOLVERS,
+    PRIORITY_WEIGHTS
 )
 from utils import (
     load_excel_data,
@@ -64,6 +65,10 @@ class ResolverProfile:
     p2_count: int = 0
     p3_count: int = 0
     p4_count: int = 0
+    
+    # Priority-weighted workload (P1×4, P2×3, P3×2, P4×1)
+    weighted_workload: float = 0.0
+    priority_distribution: Dict[str, int] = field(default_factory=dict)  # {"P1": n, "P2": n, ...}
     
     # Efficiency metrics
     avg_mttr_hours: float = 0.0
@@ -111,6 +116,13 @@ class WorkloadBalanceResult:
     avg_workload: float = 0.0
     std_workload: float = 0.0
     workload_distribution: Dict[str, int] = field(default_factory=dict)
+    
+    # Weighted workload metrics (priority-adjusted)
+    weighted_gini_coefficient: float = 0.0
+    weighted_interpretation: str = ""
+    weighted_avg_workload: float = 0.0
+    weighted_overloaded_resolvers: List[str] = field(default_factory=list)
+    weighted_workload_distribution: Dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -331,6 +343,20 @@ class BOWorkloadAnalyzer:
         profile.p2_count = len(resolver_df[resolver_df["Priority"] == "P2"])
         profile.p3_count = len(resolver_df[resolver_df["Priority"] == "P3"])
         profile.p4_count = len(resolver_df[resolver_df["Priority"] == "P4"])
+        
+        # Priority distribution and weighted workload
+        profile.priority_distribution = {
+            "P1": profile.p1_count,
+            "P2": profile.p2_count,
+            "P3": profile.p3_count,
+            "P4": profile.p4_count
+        }
+        profile.weighted_workload = (
+            profile.p1_count * PRIORITY_WEIGHTS.get("P1", 4) +
+            profile.p2_count * PRIORITY_WEIGHTS.get("P2", 3) +
+            profile.p3_count * PRIORITY_WEIGHTS.get("P3", 2) +
+            profile.p4_count * PRIORITY_WEIGHTS.get("P4", 1)
+        )
         
         # Efficiency metrics
         if "Resolution_Hours" in resolver_df.columns:
@@ -661,23 +687,23 @@ class BOWorkloadAnalyzer:
             profiles: List of resolver profiles
         
         Returns:
-            WorkloadBalanceResult with balance metrics
+            WorkloadBalanceResult with balance metrics (raw and weighted)
         """
         result = WorkloadBalanceResult()
         
         if not profiles:
             return result
         
-        # Get workload distribution
+        # Get raw workload distribution
         workloads = {p.name: p.total_tickets for p in profiles}
         result.workload_distribution = workloads
         
         workload_values = np.array(list(workloads.values()))
         
-        # Calculate Gini coefficient
+        # Calculate raw Gini coefficient
         result.gini_coefficient = calculate_gini_coefficient(workload_values)
         
-        # Interpret Gini
+        # Interpret raw Gini
         if result.gini_coefficient < GINI_GOOD_THRESHOLD:
             result.interpretation = "Well Balanced"
         elif result.gini_coefficient < GINI_WARNING_THRESHOLD:
@@ -685,11 +711,11 @@ class BOWorkloadAnalyzer:
         else:
             result.interpretation = "Severe Imbalance"
         
-        # Calculate statistics
+        # Calculate raw statistics
         result.avg_workload = float(np.mean(workload_values))
         result.std_workload = float(np.std(workload_values))
         
-        # Identify overloaded and underloaded
+        # Identify overloaded and underloaded (raw)
         overload_threshold = result.avg_workload * OVERLOAD_MULTIPLIER
         underload_threshold = result.avg_workload * 0.5
         
@@ -698,6 +724,33 @@ class BOWorkloadAnalyzer:
                 result.overloaded_resolvers.append(name)
             elif workload < underload_threshold:
                 result.underloaded_resolvers.append(name)
+        
+        # Calculate weighted workload distribution
+        weighted_workloads = {p.name: p.weighted_workload for p in profiles}
+        result.weighted_workload_distribution = weighted_workloads
+        
+        weighted_values = np.array(list(weighted_workloads.values()))
+        
+        if len(weighted_values) > 0 and weighted_values.sum() > 0:
+            # Calculate weighted Gini coefficient
+            result.weighted_gini_coefficient = calculate_gini_coefficient(weighted_values)
+            
+            # Interpret weighted Gini
+            if result.weighted_gini_coefficient < GINI_GOOD_THRESHOLD:
+                result.weighted_interpretation = "Well Balanced"
+            elif result.weighted_gini_coefficient < GINI_WARNING_THRESHOLD:
+                result.weighted_interpretation = "Moderate Imbalance"
+            else:
+                result.weighted_interpretation = "Severe Imbalance"
+            
+            # Calculate weighted statistics
+            result.weighted_avg_workload = float(np.mean(weighted_values))
+            
+            # Identify overloaded (weighted)
+            weighted_overload_threshold = result.weighted_avg_workload * OVERLOAD_MULTIPLIER
+            for name, weighted_wl in weighted_workloads.items():
+                if weighted_wl > weighted_overload_threshold:
+                    result.weighted_overloaded_resolvers.append(name)
         
         return result
     

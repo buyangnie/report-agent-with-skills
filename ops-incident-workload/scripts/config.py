@@ -120,6 +120,19 @@ DEFAULT_SLA = {
 }
 
 # =============================================================================
+# Priority Weights for Weighted Workload Calculation
+# =============================================================================
+
+# Higher priority tickets count more towards weighted workload
+# This reflects that handling P1/P2 is more valuable/difficult than P3/P4
+PRIORITY_WEIGHTS = {
+    "P1": 4,   # Critical priority = 4x weight
+    "P2": 3,   # High priority = 3x weight
+    "P3": 2,   # Medium priority = 2x weight
+    "P4": 1    # Low priority = 1x weight
+}
+
+# =============================================================================
 # Excluded Resolvers
 # =============================================================================
 

@@ -1455,6 +1455,80 @@ class NativeChartEngine:
         self._apply_style(chart, self._t("Top 10 Personnel", "人员 Top 10"))
         return chart
 
+    def chart_pers_top10_stacked_bar(self, personnel_priority) -> Optional[BarChart]:
+        """Horizontal stacked bar of top 10 personnel by count with priority breakdown.
+
+        Each bar segment represents a different priority level:
+        - P1 (Critical) - Red
+        - P2 (High) - Orange
+        - P3 (Medium) - Yellow
+        - P4 (Low) - Green
+        """
+        if not personnel_priority:
+            return None
+
+        # Take top 10 by total count (already sorted)
+        top10 = personnel_priority[:10]
+
+        # Prepare data: names and priority counts
+        names = [getattr(p, "name", f"P{i}") for i, p in enumerate(top10)]
+        p1_counts = [getattr(p, "p1_count", 0) for p in top10]
+        p2_counts = [getattr(p, "p2_count", 0) for p in top10]
+        p3_counts = [getattr(p, "p3_count", 0) for p in top10]
+        p4_counts = [getattr(p, "p4_count", 0) for p in top10]
+        totals = [getattr(p, "total", 0) for p in top10]
+
+        if sum(totals) == 0:
+            return None
+
+        # Write data to hidden sheet
+        headers = [self._t("Person", "人员"), "P1", "P2", "P3", "P4"]
+        rows = [[n, p1, p2, p3, p4] for n, p1, p2, p3, p4
+                in zip(names, p1_counts, p2_counts, p3_counts, p4_counts)]
+        sheet_title, start, end = self._write_data(headers, rows)
+
+        # Create horizontal stacked bar chart
+        chart = BarChart()
+        chart.type = "bar"  # horizontal
+        chart.grouping = "stacked"
+
+        # Categories (person names)
+        cats_ref = Reference(self._data_ws, min_col=1, min_row=start + 1, max_row=end)
+
+        # Add each priority series with specific colors
+        priority_colors = {
+            "P1": "ef4444",  # Red - Critical
+            "P2": "f97316",  # Orange - High
+            "P3": "eab308",  # Yellow - Medium
+            "P4": "22c55e",  # Green - Low
+        }
+
+        for col_idx, (priority, color) in enumerate(priority_colors.items(), 2):
+            ref = Reference(self._data_ws, min_col=col_idx, min_row=start, max_row=end)
+            chart.add_data(ref, titles_from_data=True)
+
+        chart.set_categories(cats_ref)
+
+        # Apply colors to each series
+        for i, (priority, color) in enumerate(priority_colors.items()):
+            if i < len(chart.series):
+                chart.series[i].graphicalProperties.solidFill = color
+
+        chart.x_axis.title = self._t("Ticket Count", "工单数量")
+        chart.y_axis.title = self._t("Person", "人员")
+
+        self._apply_style(chart, self._t("Top 10 Personnel by Priority",
+                                         "人员Top10 (按优先级分布)"))
+
+        # Configure data labels to show totals
+        chart.dataLabels = DataLabelList()
+        chart.dataLabels.showVal = True
+        chart.dataLabels.showCatName = False
+        chart.dataLabels.showPercent = False
+        chart.dataLabels.showSerName = False
+
+        return chart
+
     def chart_pers_performance_matrix(self, personnel):
         """Not supported in native engine — scatter with quadrants requires matplotlib."""
         return None

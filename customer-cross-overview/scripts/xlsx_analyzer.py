@@ -70,6 +70,18 @@ class PersonnelRow:
 
 
 @dataclass
+class PersonnelPriorityRow:
+    """Personnel breakdown with priority distribution."""
+    name: str
+    p1_count: int
+    p2_count: int
+    p3_count: int
+    p4_count: int
+    total: int
+    high_priority_pct: float  # (P1+P2) / total
+
+
+@dataclass
 class WorkloadBucket:
     level: str
     count: int
@@ -779,6 +791,36 @@ class XlsxDetailAnalyzer:
                 rating=rating,
                 specialty=specialty,
             ))
+        return rows
+
+    def personnel_priority_breakdown(self) -> List[PersonnelPriorityRow]:
+        """Compute personnel breakdown with priority distribution."""
+        if not _nonempty(self.inc) or "Resolver" not in self.inc.columns or "Priority" not in self.inc.columns:
+            return []
+        df = self.inc
+        rows: List[PersonnelPriorityRow] = []
+
+        for name, grp in df.groupby("Resolver", sort=False):
+            priority_counts = grp["Priority"].value_counts().to_dict()
+            p1 = int(priority_counts.get("P1", 0))
+            p2 = int(priority_counts.get("P2", 0))
+            p3 = int(priority_counts.get("P3", 0))
+            p4 = int(priority_counts.get("P4", 0))
+            total = len(grp)
+            high_pct = safe_divide(p1 + p2, total)
+
+            rows.append(PersonnelPriorityRow(
+                name=str(name),
+                p1_count=p1,
+                p2_count=p2,
+                p3_count=p3,
+                p4_count=p4,
+                total=total,
+                high_priority_pct=high_pct,
+            ))
+
+        # Sort by total count descending
+        rows.sort(key=lambda x: x.total, reverse=True)
         return rows
 
     def workload_distribution(self, personnel: List[PersonnelRow]) -> List[WorkloadBucket]:

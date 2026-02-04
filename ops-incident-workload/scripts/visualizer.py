@@ -98,7 +98,7 @@ def create_tier_distribution_chart(result: AnalysisResult) -> str:
 
 def create_bottleneck_ranking_chart(profiles: List[ResolverProfile], top_n: int = 10) -> str:
     """
-    Create horizontal bar chart for bottleneck ranking.
+    Create horizontal bar chart for bottleneck ranking with P1/P2 ratio indicators.
     
     Args:
         profiles: List of resolver profiles
@@ -107,7 +107,7 @@ def create_bottleneck_ranking_chart(profiles: List[ResolverProfile], top_n: int 
     Returns:
         Base64 encoded chart image
     """
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(12, 7))
     
     # Sort by bottleneck score
     sorted_profiles = sorted(profiles, key=lambda x: x.bottleneck_score, reverse=True)[:top_n]
@@ -118,6 +118,7 @@ def create_bottleneck_ranking_chart(profiles: List[ResolverProfile], top_n: int 
     
     names = [p.name for p in sorted_profiles]
     scores = [p.bottleneck_score for p in sorted_profiles]
+    p1_p2_ratios = [p.priority_index * 100 for p in sorted_profiles]  # Already calculated
     
     # Color based on score
     colors = []
@@ -133,17 +134,23 @@ def create_bottleneck_ranking_chart(profiles: List[ResolverProfile], top_n: int 
     y_pos = np.arange(len(names))
     bars = ax.barh(y_pos, scores, color=colors, edgecolor='white', linewidth=0.5)
     
-    # Add value labels
-    for bar, score in zip(bars, scores):
+    # Add value labels with P1/P2 ratio
+    for i, (bar, score, ratio) in enumerate(zip(bars, scores, p1_p2_ratios)):
         width = bar.get_width()
+        # Score label
         ax.text(width + 0.02, bar.get_y() + bar.get_height()/2,
-                f'{score:.2f}', va='center', ha='left', fontsize=9)
+                f'{score:.2f}', va='center', ha='left', fontsize=9, fontweight='bold')
+        # P1/P2 ratio indicator
+        if ratio > 0:
+            ax.text(0.02, bar.get_y() + bar.get_height()/2,
+                    f'P1/P2: {ratio:.0f}%', va='center', ha='left', 
+                    fontsize=8, color='white', alpha=0.9)
     
     ax.set_yticks(y_pos)
     ax.set_yticklabels(names)
     ax.set_xlabel('Bottleneck Score')
-    ax.set_title('Top Bottleneck Experts', fontsize=14, fontweight='bold')
-    ax.set_xlim(0, 1.1)
+    ax.set_title('Top Bottleneck Experts (with P1/P2 Ratio)', fontsize=14, fontweight='bold')
+    ax.set_xlim(0, 1.15)
     ax.invert_yaxis()
     
     # Add legend
@@ -226,58 +233,100 @@ def create_dependency_heatmap(
     return fig_to_base64(fig)
 
 
-def create_workload_distribution_chart(balance: WorkloadBalanceResult) -> str:
+def create_workload_distribution_chart(
+    balance: WorkloadBalanceResult,
+    profiles: List[ResolverProfile] = None
+) -> str:
     """
-    Create workload distribution bar chart.
+    Create workload distribution stacked bar chart showing P1/P2/P3/P4 breakdown.
     
     Args:
         balance: Workload balance result
+        profiles: Optional list of resolver profiles for priority breakdown
     
     Returns:
         Base64 encoded chart image
     """
-    fig, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(14, 7))
     
     if not balance.workload_distribution:
         plt.close(fig)
         return ""
     
-    # Sort by workload
+    # Sort by total workload
     sorted_items = sorted(balance.workload_distribution.items(), key=lambda x: x[1], reverse=True)
     names = [item[0] for item in sorted_items][:20]  # Top 20
-    workloads = [item[1] for item in sorted_items][:20]
     
-    # Color based on load level
-    colors = []
-    avg = balance.avg_workload
-    for w in workloads:
-        if w > avg * 1.5:
-            colors.append(COLORS["danger"])
-        elif w > avg * 1.2:
-            colors.append(COLORS["warning"])
-        elif w < avg * 0.5:
-            colors.append(COLORS["info"])
-        else:
-            colors.append(COLORS["primary"])
-    
-    # Create bar chart
-    x_pos = np.arange(len(names))
-    bars = ax.bar(x_pos, workloads, color=colors, edgecolor='white', linewidth=0.5)
+    if profiles:
+        # Build priority breakdown from profiles
+        profile_map = {p.name: p for p in profiles}
+        p1_counts = []
+        p2_counts = []
+        p3_counts = []
+        p4_counts = []
+        
+        for name in names:
+            p = profile_map.get(name)
+            if p:
+                p1_counts.append(p.p1_count)
+                p2_counts.append(p.p2_count)
+                p3_counts.append(p.p3_count)
+                p4_counts.append(p.p4_count)
+            else:
+                p1_counts.append(0)
+                p2_counts.append(0)
+                p3_counts.append(0)
+                p4_counts.append(0)
+        
+        x_pos = np.arange(len(names))
+        width = 0.7
+        
+        # Stacked bar chart with priority breakdown
+        ax.bar(x_pos, p1_counts, width, label='P1 (Critical)', color=COLORS["danger"], edgecolor='white')
+        ax.bar(x_pos, p2_counts, width, bottom=p1_counts, label='P2 (High)', color=COLORS["warning"], edgecolor='white')
+        bottom_p3 = np.array(p1_counts) + np.array(p2_counts)
+        ax.bar(x_pos, p3_counts, width, bottom=bottom_p3, label='P3 (Medium)', color=COLORS["info"], edgecolor='white')
+        bottom_p4 = bottom_p3 + np.array(p3_counts)
+        ax.bar(x_pos, p4_counts, width, bottom=bottom_p4, label='P4 (Low)', color=COLORS["success"], edgecolor='white')
+        
+    else:
+        # Fallback: simple bar chart
+        workloads = [balance.workload_distribution.get(name, 0) for name in names]
+        x_pos = np.arange(len(names))
+        avg = balance.avg_workload
+        
+        colors = []
+        for w in workloads:
+            if w > avg * 1.5:
+                colors.append(COLORS["danger"])
+            elif w > avg * 1.2:
+                colors.append(COLORS["warning"])
+            elif w < avg * 0.5:
+                colors.append(COLORS["info"])
+            else:
+                colors.append(COLORS["primary"])
+        
+        ax.bar(x_pos, workloads, color=colors, edgecolor='white', linewidth=0.5)
     
     # Add average line
+    avg = balance.avg_workload
     ax.axhline(y=avg, color=COLORS["dark"], linestyle='--', linewidth=2, label=f'Average ({avg:.1f})')
     
-    # Add Gini coefficient annotation
-    ax.text(0.95, 0.95, f'Gini: {balance.gini_coefficient:.3f}\n{balance.interpretation}',
+    # Add Gini coefficient annotations
+    gini_text = f'Raw Gini: {balance.gini_coefficient:.3f} ({balance.interpretation})'
+    if balance.weighted_gini_coefficient > 0:
+        gini_text += f'\nWeighted Gini: {balance.weighted_gini_coefficient:.3f} ({balance.weighted_interpretation})'
+    
+    ax.text(0.95, 0.95, gini_text,
             transform=ax.transAxes, ha='right', va='top',
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
-            fontsize=10)
+            fontsize=9)
     
     ax.set_xticks(x_pos)
     ax.set_xticklabels(names, rotation=45, ha='right')
     ax.set_ylabel('Ticket Count')
-    ax.set_title('Workload Distribution', fontsize=14, fontweight='bold')
-    ax.legend()
+    ax.set_title('Workload Distribution by Priority', fontsize=14, fontweight='bold')
+    ax.legend(loc='upper right')
     
     plt.tight_layout()
     return fig_to_base64(fig)
@@ -598,6 +647,62 @@ def create_trend_line_chart(trend_analysis: TrendAnalysis) -> str:
     return fig_to_base64(fig)
 
 
+def create_priority_distribution_heatmap(profiles: List[ResolverProfile], top_n: int = 20) -> str:
+    """
+    Create a heatmap showing priority distribution across resolvers.
+    
+    Args:
+        profiles: List of resolver profiles
+        top_n: Number of resolvers to show
+    
+    Returns:
+        Base64 encoded chart image
+    """
+    # Sort by weighted workload
+    sorted_profiles = sorted(profiles, key=lambda x: x.weighted_workload, reverse=True)[:top_n]
+    
+    if not sorted_profiles:
+        return ""
+    
+    # Build data for heatmap
+    resolvers = [p.name for p in sorted_profiles]
+    priorities = ['P1', 'P2', 'P3', 'P4']
+    
+    # Create matrix
+    matrix = np.zeros((len(resolvers), len(priorities)))
+    for i, p in enumerate(sorted_profiles):
+        matrix[i, 0] = p.p1_count
+        matrix[i, 1] = p.p2_count
+        matrix[i, 2] = p.p3_count
+        matrix[i, 3] = p.p4_count
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(10, max(8, len(resolvers) * 0.4)))
+    
+    # Create heatmap with custom colormap
+    cmap = sns.color_palette([COLORS["danger"], COLORS["warning"], COLORS["info"], COLORS["success"]], as_cmap=True)
+    
+    sns.heatmap(
+        matrix,
+        annot=True,
+        fmt='.0f',
+        cmap='YlOrRd',
+        xticklabels=priorities,
+        yticklabels=resolvers,
+        ax=ax,
+        cbar_kws={'label': 'Ticket Count'},
+        linewidths=0.5
+    )
+    
+    ax.set_title('Priority Distribution by Resolver\n(Higher P1/P2 = More Critical Work)', 
+                 fontsize=14, fontweight='bold')
+    ax.set_xlabel('Priority Level')
+    ax.set_ylabel('Resolver')
+    
+    plt.tight_layout()
+    return fig_to_base64(fig)
+
+
 class Visualizer:
     """
     Chart generator for BO Workload Performance Report.
@@ -624,7 +729,7 @@ class Visualizer:
         # Tier distribution
         charts["tier_distribution"] = create_tier_distribution_chart(self.result)
         
-        # Bottleneck ranking
+        # Bottleneck ranking (now with P1/P2 ratio)
         charts["bottleneck_ranking"] = create_bottleneck_ranking_chart(
             self.result.resolver_profiles
         )
@@ -635,11 +740,17 @@ class Visualizer:
             self.result.category_risks
         )
         
-        # Workload distribution
+        # Workload distribution (now with priority breakdown)
         if self.result.workload_balance:
             charts["workload_distribution"] = create_workload_distribution_chart(
-                self.result.workload_balance
+                self.result.workload_balance,
+                self.result.resolver_profiles  # Pass profiles for priority breakdown
             )
+        
+        # Priority distribution heatmap (NEW)
+        charts["priority_heatmap"] = create_priority_distribution_heatmap(
+            self.result.resolver_profiles
+        )
         
         # MTTR by tier
         charts["mttr_by_tier"] = create_mttr_by_tier_chart(self.result.resolver_profiles)

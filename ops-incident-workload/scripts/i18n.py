@@ -133,7 +133,17 @@ TEXTS = {
         "nav_contents": "Contents",
         "disclaimer": "This report is auto-generated for internal use. Data accuracy depends on source system inputs.",
         "chart_hourly_pattern": "Expert Hourly Activity Pattern",
-        "chart_sla_comparison": "SLA Compliance Comparison"
+        "chart_sla_comparison": "SLA Compliance Comparison",
+        
+        # Priority dimension
+        "weighted_workload": "Weighted Workload",
+        "priority_distribution": "Priority Distribution",
+        "p1_p2_ratio": "P1/P2 Ratio",
+        "high_priority_specialist": "High Priority Specialist",
+        "chart_priority_heatmap": "Priority Distribution Heatmap",
+        "weighted_gini": "Weighted Gini",
+        "raw_workload": "Raw Ticket Count",
+        "weighted_balance": "Priority-Weighted Balance"
     },
     
     "zh": {
@@ -260,7 +270,17 @@ TEXTS = {
         "nav_contents": "目录",
         "disclaimer": "本报告为自动生成，仅供内部参考。数据准确性取决于源系统输入。",
         "chart_hourly_pattern": "专家小时活跃度分布",
-        "chart_sla_comparison": "SLA 达成率对比"
+        "chart_sla_comparison": "SLA 达成率对比",
+        
+        # Priority dimension
+        "weighted_workload": "加权工作量",
+        "priority_distribution": "优先级分布",
+        "p1_p2_ratio": "P1/P2 占比",
+        "high_priority_specialist": "高优先级专家",
+        "chart_priority_heatmap": "优先级分布热力图",
+        "weighted_gini": "加权基尼系数",
+        "raw_workload": "原始工单数",
+        "weighted_balance": "优先级加权均衡度"
     }
 }
 

@@ -727,6 +727,18 @@ class XlsxBuilder:
             ]
             row = self._write_table(ws, headers, data, row)
 
+        # Personnel Priority Distribution table (NEW)
+        personnel_priority = self.detail.personnel_priority_breakdown()
+        if personnel_priority:
+            row = self._write_section(ws, "Personnel Priority Distribution" if self.language == "en" else "人员优先级分布", row)
+            headers = ["Name", "P1", "P2", "P3", "P4", "Total", "P1+P2%"]
+            data = [
+                [p.name, p.p1_count, p.p2_count, p.p3_count, p.p4_count,
+                 p.total, format_pct(p.high_priority_pct)]
+                for p in personnel_priority[:20]  # Show top 20
+            ]
+            row = self._write_table(ws, headers, data, row)
+
         # Workload distribution
         workload = self.detail.workload_distribution(personnel)
         if workload:
@@ -753,9 +765,9 @@ class XlsxBuilder:
         # Visual Analysis section
         row = self._write_section(ws, "Visual Analysis" if self.language == "en" else "可视化分析", row)
 
-        # Charts: top10 bar, performance matrix, skill heatmap
-        row = self._write_chart_desc(ws, "Top 10 personnel by ticket volume" if self.language == "en" else "工单量前10的人员", row)
-        row = self._add_chart(ws, self.charts.chart_pers_top10_bar, personnel, row=row)
+        # Charts: top10 stacked bar (with priority), performance matrix, skill heatmap
+        row = self._write_chart_desc(ws, "Top 10 personnel by ticket volume with priority breakdown" if self.language == "en" else "工单量前10的人员 (按优先级分布)", row)
+        row = self._add_chart(ws, self.charts.chart_pers_top10_stacked_bar, personnel_priority, row=row)
         row = self._write_chart_desc(ws, "Performance Matrix (Volume vs MTTR)" if self.language == "en" else "绩效矩阵 (工单量 vs 平均解决时间)", row)
         row = self._add_chart(ws, self.charts.chart_pers_performance_matrix, personnel, row=row)
         # Heatmap (uses "Resolver" column)

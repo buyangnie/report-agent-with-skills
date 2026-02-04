@@ -181,7 +181,7 @@ Output requirements:
     
     def generate_executive_summary_insight(self, result: AnalysisResult) -> str:
         """
-        Generate executive summary insight.
+        Generate executive summary insight with priority distribution context.
         
         Args:
             result: Analysis result
@@ -189,6 +189,18 @@ Output requirements:
         Returns:
             Generated insight text
         """
+        # Calculate total P1/P2 vs P3/P4 ratio for context
+        total_p1_p2 = sum(p.p1_count + p.p2_count for p in result.resolver_profiles)
+        total_p3_p4 = sum(p.p3_count + p.p4_count for p in result.resolver_profiles)
+        total = total_p1_p2 + total_p3_p4
+        high_priority_ratio = total_p1_p2 / total * 100 if total > 0 else 0
+        
+        # Find top contributors by weighted workload
+        sorted_by_weighted = sorted(result.resolver_profiles, key=lambda x: x.weighted_workload, reverse=True)[:5]
+        top_weighted_info = []
+        for p in sorted_by_weighted:
+            top_weighted_info.append(f"- {p.name}: Weighted={p.weighted_workload:.0f}, P1/P2={p.priority_index*100:.0f}%")
+        
         # Build context
         context = f"""
 Total Resolvers: {result.total_resolvers}
@@ -200,9 +212,15 @@ Global SLA Rate: {result.global_sla_rate:.1%}
 High Risk Items: {result.high_risk_count}
 Bottleneck Count: {result.bottleneck_count}
 Tier Distribution: {result.tier_counts}
-"""
+
+Priority Analysis:
+- High Priority (P1/P2) Tickets: {total_p1_p2} ({high_priority_ratio:.1f}%)
+- Standard Priority (P3/P4) Tickets: {total_p3_p4} ({100-high_priority_ratio:.1f}%)
+
+Top Contributors by Weighted Workload:
+""" + "\n".join(top_weighted_info)
         
-        cache_key = self._get_cache_key(f"exec_summary_{context}")
+        cache_key = self._get_cache_key(f"exec_summary_v2_{context}")
         cached = self._get_cached_insight(cache_key)
         if cached:
             return cached
@@ -214,8 +232,10 @@ Tier Distribution: {result.tier_counts}
 
 请包含：
 1. 整体健康度评估
-2. 最关键的风险点（2-3个）
-3. 需要立即关注的事项"""
+2. 优先级分布分析（P1/P2 高优先级工单的处理情况）
+3. 最关键的风险点（2-3个）
+4. 识别处理高优先级工单的关键人员及其价值
+5. 需要立即关注的事项"""
         else:
             prompt = f"""Based on the following BO workload analysis data, generate an executive summary insight:
 
@@ -223,8 +243,10 @@ Tier Distribution: {result.tier_counts}
 
 Please include:
 1. Overall health assessment
-2. Most critical risk points (2-3)
-3. Items requiring immediate attention"""
+2. Priority distribution analysis (P1/P2 high-priority ticket handling)
+3. Most critical risk points (2-3)
+4. Identify key contributors handling high-priority tickets and their value
+5. Items requiring immediate attention"""
         
         insight = self._call_ai(prompt)
         self._cache_insight(cache_key, insight)
